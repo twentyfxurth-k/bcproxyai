@@ -250,6 +250,42 @@ async function fetchMistralModels(): Promise<ModelRow[]> {
   }
 }
 
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY ?? "";
+
+async function generateNickname(modelName: string, provider: string, existingNames: string[]): Promise<string | null> {
+  if (!DEEPSEEK_API_KEY) return null;
+  try {
+    const avoid = existingNames.length > 0 ? `\nห้ามใช้ชื่อเหล่านี้: ${existingNames.join(", ")}` : "";
+    const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: [{
+          role: "user",
+          content: `ตั้งชื่อเล่นภาษาไทยตลกๆ น่ารัก ให้ AI model ชื่อ "${modelName}" จาก ${provider} ตอบแค่ชื่อเดียว สั้นๆ 2-4 คำ ห้ามใส่เครื่องหมายคำพูด ห้ามอธิบาย${avoid}`,
+        }],
+        max_tokens: 30,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const name = (json.choices?.[0]?.message?.content ?? "")
+      .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
+      .replace(/["'`]/g, "")
+      .trim()
+      .split("\n")[0]
+      .slice(0, 30);
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function scanModels(): Promise<{ found: number; new: number; disappeared: number }> {
   logWorker("scan", "Starting model scan");
   const db = getDb();
@@ -277,6 +313,8 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     WHERE id = ?
   `);
 
+  const newModels: ModelRow[] = [];
+
   const upsertMany = db.transaction((models: ModelRow[]) => {
     for (const m of models) {
       const result = insertStmt.run(
@@ -284,6 +322,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
       );
       if (result.changes > 0) {
         newCount++;
+        newModels.push(m);
         logWorker("scan", `🆕 โมเดลใหม่: ${m.name} (${m.provider}) — ${calcTier(m.context_length).toUpperCase()} ${m.context_length >= 1000 ? Math.round(m.context_length/1000)+"K" : m.context_length} ctx`, "success");
       } else {
         updateStmt.run(m.context_length, m.tier, m.id);
@@ -295,6 +334,24 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     upsertMany(allModels);
   } catch (err) {
     logWorker("scan", `DB upsert error: ${err}`, "error");
+  }
+
+  // ให้ DeepSeek ตั้งชื่อเล่นให้โมเดลใหม่ (max 5 ต่อรอบ ประหยัด token)
+  if (DEEPSEEK_API_KEY && newModels.length > 0) {
+    const updateNickname = db.prepare("UPDATE models SET nickname = ? WHERE id = ?");
+    // ดึงชื่อที่มีอยู่แล้วเพื่อไม่ให้ซ้ำ
+    const existingNicknames = (db.prepare("SELECT nickname FROM models WHERE nickname IS NOT NULL").all() as { nickname: string }[]).map(r => r.nickname);
+    const toName = newModels.slice(0, 5);
+    for (const m of toName) {
+      const nickname = await generateNickname(m.name, m.provider, existingNicknames);
+      if (nickname && !existingNicknames.includes(nickname)) {
+        try {
+          updateNickname.run(nickname, m.id);
+          existingNicknames.push(nickname);
+          logWorker("scan", `🎭 ตั้งชื่อ: ${m.name} → "${nickname}"`, "success");
+        } catch { /* silent */ }
+      }
+    }
   }
 
   // ตรวจจับ model ที่หายไป — ไม่เจอใน scan นี้ แต่เคย last_seen ภายใน 24 ชม.

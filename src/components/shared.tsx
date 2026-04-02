@@ -62,6 +62,7 @@ export interface BenchmarkInfo {
 export interface ModelData {
   id: string;
   name: string;
+  nickname: string | null;
   provider: string;
   modelId: string;
   contextLength: number;

@@ -31,6 +31,7 @@ function initSchema(db: Database.Database) {
       description TEXT,
       supports_tools INTEGER DEFAULT -1,
       supports_vision INTEGER DEFAULT -1,
+      nickname TEXT,
       first_seen TEXT DEFAULT (datetime('now')),
       last_seen TEXT DEFAULT (datetime('now'))
     );

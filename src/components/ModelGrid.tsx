@@ -118,7 +118,12 @@ export function ModelGrid({ sortedModels, availableCount, cooldownCount, unknown
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <GlowDot status={model.health.status} />
-                    <span className="font-medium text-sm text-gray-100 truncate leading-tight">{model.name}</span>
+                    <div className="min-w-0">
+                      {model.nickname && (
+                        <span className="text-sm font-bold text-amber-300 truncate block leading-tight">{model.nickname}</span>
+                      )}
+                      <span className={`${model.nickname ? "text-xs text-gray-500" : "text-sm text-gray-100 font-medium"} truncate block leading-tight`}>{model.name}</span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {gradeInfo && (
