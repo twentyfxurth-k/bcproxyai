@@ -214,16 +214,14 @@ export default function Dashboard() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, m, l, g] = await Promise.all([
+      const [s, m, l] = await Promise.all([
         fetch("/api/status").then((r) => r.json()),
         fetch("/api/models").then((r) => r.json()),
         fetch("/api/leaderboard").then((r) => r.json()),
-        fetch("/api/gateway-logs").then((r) => r.json()).catch(() => []),
       ]);
       setStatusData(s);
       setModels(Array.isArray(m) ? m : []);
       setLeaderboard(Array.isArray(l) ? l : []);
-      setGatewayLogs(Array.isArray(g) ? g : []);
       setLastRefresh(new Date());
     } catch (err) {
       console.error("fetch error", err);
@@ -232,11 +230,21 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Gateway logs — realtime polling every 2 seconds
+  const fetchGatewayLogs = useCallback(async () => {
+    try {
+      const g = await fetch("/api/gateway-logs").then((r) => r.json());
+      setGatewayLogs(Array.isArray(g) ? g : []);
+    } catch { /* silent */ }
+  }, []);
+
   useEffect(() => {
     fetchAll();
-    const t = setInterval(fetchAll, 15_000);
-    return () => clearInterval(t);
-  }, [fetchAll]);
+    fetchGatewayLogs();
+    const t1 = setInterval(fetchAll, 15_000);
+    const t2 = setInterval(fetchGatewayLogs, 2_000);
+    return () => { clearInterval(t1); clearInterval(t2); };
+  }, [fetchAll, fetchGatewayLogs]);
 
   const triggerWorker = async () => {
     setTriggering(true);
@@ -607,7 +615,14 @@ export default function Dashboard() {
               </svg>
             </span>
             <span className="font-bold text-white text-2xl">Gateway Log</span>
-            <span className="text-xs text-gray-500">{gatewayLogs.length} รายการล่าสุด</span>
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              </span>
+              LIVE
+            </span>
+            <span className="text-xs text-gray-500">{gatewayLogs.length} รายการ</span>
           </div>
 
           <div className="glass rounded-2xl overflow-hidden">
