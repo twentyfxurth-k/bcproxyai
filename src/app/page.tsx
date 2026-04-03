@@ -522,12 +522,25 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Total saved highlight */}
-              <div className="glass rounded-lg p-3 border border-emerald-500/20 bg-emerald-500/5 flex items-center justify-between">
-                <span className="text-sm text-emerald-300">ยอดสะสมประหยัดได้ (เทียบ Claude):</span>
-                <div className="text-right">
-                  <span className="text-xl font-black text-emerald-300">${costSavings.totalSaved.toFixed(2)}</span>
-                  <span className="text-sm text-emerald-500 ml-2">(฿{costSavings.totalSavedThb.toFixed(0)})</span>
+              {/* Total saved highlight — compare all */}
+              <div className="glass rounded-lg p-3 border border-emerald-500/20 bg-emerald-500/5">
+                <div className="text-xs text-emerald-400 mb-2 font-semibold">ยอดสะสมที่ประหยัดได้ (เทียบแต่ละเจ้า):</div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500">vs GPT-4o</div>
+                    <div className="text-lg font-black text-emerald-300">${costSavings.costGpt4o.toFixed(2)}</div>
+                    <div className="text-xs text-emerald-500">฿{costSavings.costGpt4oThb.toFixed(0)}</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500">vs Claude</div>
+                    <div className="text-lg font-black text-emerald-300">${costSavings.costClaude.toFixed(2)}</div>
+                    <div className="text-xs text-emerald-500">฿{costSavings.costClaudeThb.toFixed(0)}</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500">vs Qwen</div>
+                    <div className="text-lg font-black text-emerald-300">${costSavings.costQwen.toFixed(2)}</div>
+                    <div className="text-xs text-emerald-500">฿{costSavings.costQwenThb.toFixed(0)}</div>
+                  </div>
                 </div>
               </div>
             </div>
