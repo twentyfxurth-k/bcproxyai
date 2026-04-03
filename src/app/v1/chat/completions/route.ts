@@ -251,6 +251,25 @@ function parseModelField(model: string): {
   return { mode: "match", modelId: model };
 }
 
+// Last resort: get ALL models including cooldown ones — better than 503
+function getAllModelsIncludingCooldown(caps: RequestCapabilities): ModelRow[] {
+  const db = getDb();
+  const filters: string[] = ["m.context_length >= 32000"];
+  if (caps.hasTools) filters.push("m.supports_tools = 1");
+  if (caps.hasImages) filters.push("m.supports_vision = 1");
+  const whereClause = filters.join(" AND ");
+
+  return db.prepare(`
+    SELECT m.id, m.provider, m.model_id, m.supports_tools, m.supports_vision, m.tier, m.context_length,
+      COALESCE(b.avg_score, 0) as avg_score, COALESCE(b.avg_latency, 9999999) as avg_latency
+    FROM models m
+    LEFT JOIN (SELECT model_id, AVG(score) as avg_score, AVG(latency_ms) as avg_latency FROM benchmark_results GROUP BY model_id) b ON m.id = b.model_id
+    WHERE ${whereClause}
+    ORDER BY RANDOM()
+    LIMIT 20
+  `).all() as ModelRow[];
+}
+
 function selectModelsByMode(
   mode: string,
   caps: RequestCapabilities,
@@ -438,15 +457,20 @@ export async function POST(req: NextRequest) {
     const tokensEst = estInputTokens;
     const candidates = selectModelsByMode(parsed.mode, caps, tokensEst);
 
-    if (candidates.length === 0) {
-      const availCount = selectModelsByMode(parsed.mode, caps, 0).length;
-      const msg = availCount > 0
-        ? `ไม่มีโมเดลที่ context window รองรับ request ขนาด ~${tokensEst} tokens (มีโมเดล ${availCount} ตัว แต่ context เล็กเกินไป)`
-        : "ไม่มีโมเดลพร้อมใช้งาน — ทุกตัวติด cooldown หรือ error ลองอีกครั้งในอีกสักครู่";
+    // ถ้าไม่มี candidate → ลองไม่ filter context → ลองรวม cooldown (สุ่มเลือก ดีกว่า 503)
+    let finalCandidates = candidates;
+    if (finalCandidates.length === 0) {
+      finalCandidates = selectModelsByMode(parsed.mode, caps, 0);
+    }
+    if (finalCandidates.length === 0) {
+      // Last resort: สุ่มจาก ALL models (รวม cooldown) — ดีกว่าไม่ตอบ
+      finalCandidates = getAllModelsIncludingCooldown(caps);
+    }
+    if (finalCandidates.length === 0) {
       return NextResponse.json(
         {
           error: {
-            message: msg,
+            message: "ไม่มีโมเดลในระบบเลย — รอ Worker สแกนก่อน กดปุ่ม 'รันตอนนี้' บน Dashboard",
             type: "server_error",
             code: 503,
           },
@@ -462,9 +486,9 @@ export async function POST(req: NextRequest) {
     const triedProviders = new Set<string>();
 
     // Weighted Load Balancing: prefer providers with higher score + lower latency
-    const spreadCandidates: typeof candidates = [];
-    const byProvider: Record<string, typeof candidates> = {};
-    for (const c of candidates) {
+    const spreadCandidates: typeof finalCandidates = [];
+    const byProvider: Record<string, typeof finalCandidates> = {};
+    for (const c of finalCandidates) {
       (byProvider[c.provider] ??= []).push(c);
     }
     // Sort providers by weight: score * 1000 - latency (higher = better)
@@ -478,7 +502,7 @@ export async function POST(req: NextRequest) {
     // Round-robin across weighted providers
     let hasMore = true;
     let round = 0;
-    while (hasMore && spreadCandidates.length < candidates.length) {
+    while (hasMore && spreadCandidates.length < finalCandidates.length) {
       hasMore = false;
       for (const { models: provModels } of providerOrder) {
         if (round < provModels.length) {
@@ -500,6 +524,11 @@ export async function POST(req: NextRequest) {
         if (response.ok) {
           const latency = Date.now() - startTime;
           logGateway(modelField, actualModelId, provider, 200, latency, 0, 0, null, userMsg, null);
+          // Model ทำงานได้ → clear cooldown ให้กลับมาใช้ได้ทันที
+          try {
+            const db = getDb();
+            db.prepare("DELETE FROM health_logs WHERE model_id = ? AND cooldown_until > datetime('now')").run(dbModelId);
+          } catch { /* silent */ }
           return buildProxiedResponse(response, provider, actualModelId, isStream, estInputTokens);
         }
 
