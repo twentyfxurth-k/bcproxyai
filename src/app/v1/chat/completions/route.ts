@@ -243,7 +243,7 @@ function parseModelField(model: string): {
   if (model === "bcproxy/thai") return { mode: "thai" };
 
   // openrouter/xxx, kilo/xxx, groq/xxx
-  const providerMatch = model.match(/^(openrouter|kilo|groq|cerebras|sambanova|mistral)\/(.+)$/);
+  const providerMatch = model.match(/^(openrouter|kilo|groq|cerebras|sambanova|mistral|ollama)\/(.+)$/);
   if (providerMatch) {
     return { mode: "direct", provider: providerMatch[1], modelId: providerMatch[2] };
   }
@@ -641,9 +641,18 @@ function buildProxiedResponse(
   }
 
   // Non-streaming: clone body, extract usage, then return
-  const [bodyForUser, bodyForTracking] = upstream.body
-    ? [upstream.body, upstream.clone().body]
-    : [null, null];
+  let bodyForUser: ReadableStream | null = null;
+  let bodyForTracking: ReadableStream | null = null;
+  try {
+    if (upstream.body && !upstream.bodyUsed) {
+      const cloned = upstream.clone();
+      bodyForUser = upstream.body;
+      bodyForTracking = cloned.body;
+    }
+  } catch {
+    // Body already consumed — just pass through
+    bodyForUser = upstream.body;
+  }
 
   // Fire-and-forget: read clone to extract token usage
   if (bodyForTracking) {

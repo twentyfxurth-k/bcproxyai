@@ -10,6 +10,7 @@ const ENV_MAP: Record<string, string> = {
   cerebras: "CEREBRAS_API_KEY",
   sambanova: "SAMBANOVA_API_KEY",
   mistral: "MISTRAL_API_KEY",
+  ollama: "OLLAMA_API_KEY",
 };
 
 // Clean expired entries every 100 calls
@@ -30,6 +31,8 @@ export function getNextApiKey(provider: string): string {
 
   const raw = process.env[envVar] ?? "";
   const keys = raw.split(",").map((k) => k.trim()).filter(Boolean);
+  // Ollama ไม่ต้อง key — ใส่ default "ollama"
+  if (keys.length === 0 && provider === "ollama") return "ollama";
   if (keys.length === 0) return "";
 
   // Filter out cooled-down keys

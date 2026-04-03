@@ -14,6 +14,7 @@ const PROVIDER_EMOJI: Record<string, string> = {
   cerebras:   "\u{1F9E0}",  // 🧠
   sambanova:  "\u{1F680}",  // 🚀
   mistral:    "\u{1F4A8}",  // 💨
+  ollama:     "\u{1F4BB}",  // 💻
 };
 
 const PROVIDER_HEX: Record<string, string> = {
@@ -24,6 +25,7 @@ const PROVIDER_HEX: Record<string, string> = {
   cerebras:   "#f43f5e",
   sambanova:  "#14b8a6",
   mistral:    "#38bdf8",
+  ollama:     "#84cc16",
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────

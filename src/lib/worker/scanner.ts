@@ -247,6 +247,38 @@ async function fetchMistralModels(): Promise<ModelRow[]> {
   }
 }
 
+async function fetchOllamaModels(): Promise<ModelRow[]> {
+  const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+  try {
+    const res = await fetch(`${baseUrl}/api/tags`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const models: ModelRow[] = [];
+    for (const m of json.models ?? []) {
+      const name: string = m.name ?? m.model ?? "";
+      if (!name) continue;
+      // Ollama model size → estimate context length
+      const sizeGB = (m.size ?? 0) / (1024 * 1024 * 1024);
+      const ctx = sizeGB >= 20 ? 131072 : sizeGB >= 8 ? 65536 : 32768;
+      models.push({
+        id: `ollama:${name}`,
+        name: name,
+        provider: "ollama",
+        model_id: name,
+        context_length: ctx,
+        tier: calcTier(ctx),
+        description: `Local model (${sizeGB.toFixed(1)}GB)`,
+      });
+    }
+    return models;
+  } catch {
+    // Ollama ไม่ได้รัน — ข้ามเงียบๆ (ไม่ log error เพราะอาจไม่ได้ติดตั้ง)
+    return [];
+  }
+}
+
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY ?? "";
 
 export async function generateNickname(modelName: string, provider: string, existingNames: string[], scoreInfo = ""): Promise<string | null> {
@@ -287,7 +319,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
   logWorker("scan", "Starting model scan");
   const db = getDb();
 
-  const [orModels, kiloModels, googleModels, groqModels, cerebrasModels, sambaNovaModels, mistralModels] = await Promise.all([
+  const [orModels, kiloModels, googleModels, groqModels, cerebrasModels, sambaNovaModels, mistralModels, ollamaModels] = await Promise.all([
     fetchOpenRouterModels(),
     fetchKiloModels(),
     fetchGoogleModels(),
@@ -295,9 +327,10 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     fetchCerebrasModels(),
     fetchSambaNovaModels(),
     fetchMistralModels(),
+    fetchOllamaModels(),
   ]);
 
-  const allModels = [...orModels, ...kiloModels, ...googleModels, ...groqModels, ...cerebrasModels, ...sambaNovaModels, ...mistralModels];
+  const allModels = [...orModels, ...kiloModels, ...googleModels, ...groqModels, ...cerebrasModels, ...sambaNovaModels, ...mistralModels, ...ollamaModels];
   const foundIds = new Set(allModels.map(m => m.id));
   let newCount = 0;
 
@@ -382,7 +415,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     }
   } catch { /* silent */ }
 
-  const msg = `Scan: พบ ${allModels.length} (OR=${orModels.length}, Kilo=${kiloModels.length}, Google=${googleModels.length}, Groq=${groqModels.length}, Cerebras=${cerebrasModels.length}, SambaNova=${sambaNovaModels.length}, Mistral=${mistralModels.length}) | ใหม่ ${newCount} | หายไป ${disappearedCount}`;
+  const msg = `Scan: พบ ${allModels.length} (OR=${orModels.length}, Kilo=${kiloModels.length}, Google=${googleModels.length}, Groq=${groqModels.length}, Cerebras=${cerebrasModels.length}, SN=${sambaNovaModels.length}, Mistral=${mistralModels.length}, Ollama=${ollamaModels.length}) | ใหม่ ${newCount} | หายไป ${disappearedCount}`;
   logWorker("scan", msg);
 
   return { found: allModels.length, new: newCount, disappeared: disappearedCount };

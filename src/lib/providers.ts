@@ -7,6 +7,7 @@ export const PROVIDER_URLS: Record<string, string> = {
   cerebras: "https://api.cerebras.ai/v1/chat/completions",
   sambanova: "https://api.sambanova.ai/v1/chat/completions",
   mistral: "https://api.mistral.ai/v1/chat/completions",
+  ollama: `${process.env.OLLAMA_BASE_URL || "http://localhost:11434"}/v1/chat/completions`,
 };
 
 export const PROVIDER_LABELS: Record<string, string> = {
@@ -17,4 +18,5 @@ export const PROVIDER_LABELS: Record<string, string> = {
   cerebras: "Cerebras",
   sambanova: "SN",
   mistral: "Mistral",
+  ollama: "Local",
 };

@@ -97,6 +97,7 @@ export const PROVIDER_COLORS: Record<string, { text: string; bg: string; border:
   cerebras:   { text: "text-rose-300", bg: "bg-rose-500/20", border: "border-rose-500/40", glow: "rgba(244,63,94,0.5)" },
   sambanova:  { text: "text-teal-300", bg: "bg-teal-500/20", border: "border-teal-500/40", glow: "rgba(20,184,166,0.5)" },
   mistral:    { text: "text-sky-300", bg: "bg-sky-500/20", border: "border-sky-500/40", glow: "rgba(56,189,248,0.5)" },
+  ollama:     { text: "text-lime-300", bg: "bg-lime-500/20", border: "border-lime-500/40", glow: "rgba(132,204,22,0.5)" },
 };
 
 export const TIER_LABELS: Record<string, string> = { large: "L", medium: "M", small: "S" };
