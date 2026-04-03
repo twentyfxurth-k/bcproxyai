@@ -495,7 +495,10 @@ export async function POST(req: NextRequest) {
     const triedProviders = new Set<string>();
 
     // Ollama (local) ALWAYS first
-    const ollamaCandidates = finalCandidates.filter(c => c.provider === "ollama");
+    // Ollama: sort by latency (smaller/faster models first)
+    const ollamaCandidates = finalCandidates
+      .filter(c => c.provider === "ollama")
+      .sort((a, b) => (a.avg_latency ?? 9999999) - (b.avg_latency ?? 9999999));
     const cloudCandidates = finalCandidates.filter(c => c.provider !== "ollama");
 
     // Spread cloud candidates across providers by weight
