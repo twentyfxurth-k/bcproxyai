@@ -510,13 +510,16 @@ export async function POST(req: NextRequest) {
     const userMsg = extractUserMessage(body);
     const triedProviders = new Set<string>();
 
-    // Weighted Load Balancing: prefer providers with higher score + lower latency
-    const spreadCandidates: typeof finalCandidates = [];
+    // Ollama (local) ALWAYS first, then cloud by score+latency
+    const ollamaCandidates = finalCandidates.filter(c => c.provider === "ollama");
+    const cloudCandidates = finalCandidates.filter(c => c.provider !== "ollama");
+
+    // Spread cloud candidates across providers by weight
+    const spreadCandidates: typeof finalCandidates = [...ollamaCandidates]; // Ollama first!
     const byProvider: Record<string, typeof finalCandidates> = {};
-    for (const c of finalCandidates) {
+    for (const c of cloudCandidates) {
       (byProvider[c.provider] ??= []).push(c);
     }
-    // Sort providers by weight: score * 1000 - latency (higher = better)
     const providerOrder = Object.entries(byProvider)
       .map(([, models]) => {
         const avgLat = models.reduce((s, m) => s + (m.avg_latency ?? 9999999), 0) / models.length;
@@ -527,7 +530,8 @@ export async function POST(req: NextRequest) {
     // Round-robin across weighted providers
     let hasMore = true;
     let round = 0;
-    while (hasMore && spreadCandidates.length < finalCandidates.length) {
+    const totalExpected = ollamaCandidates.length + cloudCandidates.length;
+    while (hasMore && spreadCandidates.length < totalExpected) {
       hasMore = false;
       for (const { models: provModels } of providerOrder) {
         if (round < provModels.length) {
