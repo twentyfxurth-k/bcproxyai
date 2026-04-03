@@ -502,8 +502,9 @@ export async function POST(req: NextRequest) {
     const userMsg = extractUserMessage(body);
     const triedProviders = new Set<string>();
 
-    // Ollama (local) ALWAYS first, then cloud by score+latency
-    const ollamaCandidates = finalCandidates.filter(c => c.provider === "ollama");
+    // Ollama (local) ALWAYS first — get Ollama separately without context filter
+    const ollamaCandidates = getAllModelsIncludingCooldown({ ...caps, hasTools: false, hasImages: false })
+      .filter(c => c.provider === "ollama");
     const cloudCandidates = finalCandidates.filter(c => c.provider !== "ollama");
 
     // Spread cloud candidates across providers by weight
