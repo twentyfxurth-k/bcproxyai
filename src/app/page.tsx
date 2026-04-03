@@ -205,11 +205,20 @@ export default function Dashboard() {
   interface CostSavings {
     totalInputTokens: number;
     totalOutputTokens: number;
+    totalTokens: number;
+    totalRequests: number;
+    todayRequests: number;
     costGpt4o: number;
     costClaude: number;
+    costQwen: number;
+    costGpt4oThb: number;
+    costClaudeThb: number;
+    costQwenThb: number;
     actualCost: number;
     totalSaved: number;
+    totalSavedThb: number;
     todaySaved: number;
+    todaySavedThb: number;
   }
   const [costSavings, setCostSavings] = useState<CostSavings | null>(null);
 
@@ -468,31 +477,57 @@ export default function Dashboard() {
           <GatewayConfigCard />
 
           {/* Cost Savings Card */}
-          {costSavings && (costSavings.totalInputTokens + costSavings.totalOutputTokens) > 0 && (
-            <div className="mt-6 glass-bright rounded-2xl p-5 neon-border max-w-3xl mx-auto">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-lg">💰</span>
-                <span className="font-bold text-white text-lg">ประหยัดได้เท่าไหร่?</span>
+          {costSavings && costSavings.totalTokens > 0 && (
+            <div className="mt-6 glass-bright rounded-2xl p-5 neon-border max-w-4xl mx-auto">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">💰</span>
+                  <span className="font-bold text-white text-lg">เทียบต้นทุน</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-gray-500">
+                  <span>สะสม {costSavings.totalRequests.toLocaleString()} requests</span>
+                  <span>|</span>
+                  <span>วันนี้ {costSavings.todayRequests.toLocaleString()}</span>
+                </div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+
+              {/* Token usage summary */}
+              <div className="flex items-center gap-4 mb-4 text-sm">
+                <span className="text-gray-500">ใช้ไป:</span>
+                <span className="text-indigo-300 font-bold">{(costSavings.totalTokens / 1000).toFixed(0)}K tokens</span>
+                <span className="text-gray-600">(input {(costSavings.totalInputTokens / 1000).toFixed(0)}K + output {(costSavings.totalOutputTokens / 1000).toFixed(0)}K)</span>
+              </div>
+
+              {/* Cost comparison table */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
                 <div className="glass rounded-lg p-3 text-center">
-                  <div className="text-xs text-gray-500 mb-1">ใช้ไป (tokens)</div>
-                  <div className="text-lg font-bold text-indigo-300">
-                    {((costSavings.totalInputTokens + costSavings.totalOutputTokens) / 1000).toFixed(0)}K
-                  </div>
-                </div>
-                <div className="glass rounded-lg p-3 text-center">
-                  <div className="text-xs text-gray-500 mb-1">ถ้าใช้ GPT-4o</div>
+                  <div className="text-xs text-gray-500 mb-1">GPT-4o</div>
                   <div className="text-lg font-bold text-red-400">${costSavings.costGpt4o.toFixed(2)}</div>
+                  <div className="text-xs text-red-500/60">฿{costSavings.costGpt4oThb.toFixed(0)}</div>
                 </div>
                 <div className="glass rounded-lg p-3 text-center">
-                  <div className="text-xs text-gray-500 mb-1">ถ้าใช้ Claude</div>
+                  <div className="text-xs text-gray-500 mb-1">Claude Sonnet</div>
                   <div className="text-lg font-bold text-red-400">${costSavings.costClaude.toFixed(2)}</div>
+                  <div className="text-xs text-red-500/60">฿{costSavings.costClaudeThb.toFixed(0)}</div>
+                </div>
+                <div className="glass rounded-lg p-3 text-center">
+                  <div className="text-xs text-gray-500 mb-1">Qwen Plus</div>
+                  <div className="text-lg font-bold text-amber-400">${costSavings.costQwen.toFixed(2)}</div>
+                  <div className="text-xs text-amber-500/60">฿{costSavings.costQwenThb.toFixed(0)}</div>
                 </div>
                 <div className="glass rounded-lg p-3 text-center border border-emerald-500/30 bg-emerald-500/5">
-                  <div className="text-xs text-emerald-400 mb-1">BCProxyAI ประหยัด</div>
-                  <div className="text-lg font-bold text-emerald-300">${costSavings.totalSaved.toFixed(2)}</div>
+                  <div className="text-xs text-emerald-400 mb-1">BCProxyAI</div>
+                  <div className="text-lg font-bold text-emerald-300">$0.00</div>
                   <div className="text-xs text-emerald-500">ฟรี!</div>
+                </div>
+              </div>
+
+              {/* Total saved highlight */}
+              <div className="glass rounded-lg p-3 border border-emerald-500/20 bg-emerald-500/5 flex items-center justify-between">
+                <span className="text-sm text-emerald-300">ยอดสะสมประหยัดได้ (เทียบ Claude):</span>
+                <div className="text-right">
+                  <span className="text-xl font-black text-emerald-300">${costSavings.totalSaved.toFixed(2)}</span>
+                  <span className="text-sm text-emerald-500 ml-2">(฿{costSavings.totalSavedThb.toFixed(0)})</span>
                 </div>
               </div>
             </div>

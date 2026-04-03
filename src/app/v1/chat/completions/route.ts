@@ -364,6 +364,9 @@ async function forwardToProvider(
   // On 429, mark this key as rate-limited and cooldown 5 minutes
   if (response.status === 429) {
     markKeyCooldown(provider, apiKey, 300000);
+    // Return a new response with the body text so caller can read it
+    const text = await response.text();
+    return new Response(text, { status: 429, headers: response.headers });
   }
 
   return response;
@@ -479,7 +482,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const MAX_RETRIES = 7; // try up to 7 models across different providers
+    const MAX_RETRIES = 10; // try up to 10 models across different providers
     let lastError = "";
     const startTime = Date.now();
     const userMsg = extractUserMessage(body);
@@ -533,7 +536,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Non-200: cooldown only for rate limit / server errors, skip for others
-        const errText = await response.text();
+        const errText = await response.text().catch(() => "");
         lastError = `${provider}/${actualModelId}: HTTP ${response.status}`;
         const st = response.status;
         if (st === 429 || st === 413 || st >= 500 || st === 401 || st === 403) {
