@@ -567,7 +567,7 @@ export async function POST(req: NextRequest) {
         const errText = await response.text().catch(() => "");
         lastError = `${provider}/${actualModelId}: HTTP ${response.status}`;
         const st = response.status;
-        if (provider !== "ollama" && (st === 429 || st === 413 || st >= 500 || st === 401 || st === 403)) {
+        if (provider !== "ollama" && (st === 429 || st === 413 || st === 422 || st >= 500 || st === 401 || st === 403)) {
           logCooldown(dbModelId, `HTTP ${st}: ${errText}`, st);
         }
         // Always retry next model regardless
