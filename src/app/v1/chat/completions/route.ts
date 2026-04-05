@@ -247,7 +247,7 @@ function parseModelField(model: string): {
   if (model === "bcproxy/consensus") return { mode: "consensus" };
 
   // openrouter/xxx, kilo/xxx, groq/xxx
-  const providerMatch = model.match(/^(openrouter|kilo|groq|cerebras|sambanova|mistral|ollama)\/(.+)$/);
+  const providerMatch = model.match(/^(openrouter|kilo|google|groq|cerebras|sambanova|mistral|ollama|github|fireworks|cohere|cloudflare)\/(.+)$/);
   if (providerMatch) {
     return { mode: "direct", provider: providerMatch[1], modelId: providerMatch[2] };
   }

@@ -616,7 +616,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     }
   } catch { /* silent */ }
 
-  const msg = `Scan: พบ ${allModels.length} (OR=${orModels.length}, Kilo=${kiloModels.length}, Google=${googleModels.length}, Groq=${groqModels.length}, Cerebras=${cerebrasModels.length}, SN=${sambaNovaModels.length}, Mistral=${mistralModels.length}, Ollama=${ollamaModels.length}) | ใหม่ ${newCount} | หายไป ${disappearedCount}`;
+  const msg = `Scan: พบ ${allModels.length} (OR=${orModels.length}, Kilo=${kiloModels.length}, Google=${googleModels.length}, Groq=${groqModels.length}, Cerebras=${cerebrasModels.length}, SN=${sambaNovaModels.length}, Mistral=${mistralModels.length}, Ollama=${ollamaModels.length}, GitHub=${githubModels.length}, FW=${fireworksModels.length}, Cohere=${cohereModels.length}, CF=${cloudflareModels.length}) | ใหม่ ${newCount} | หายไป ${disappearedCount}`;
   logWorker("scan", msg);
 
   return { found: allModels.length, new: newCount, disappeared: disappearedCount };

@@ -13,6 +13,10 @@ const PRICING: Record<string, { input: number; output: number; free?: boolean }>
   sambanova:  { input: 0, output: 0, free: true },
   mistral:    { input: 0, output: 0, free: true },
   ollama:     { input: 0, output: 0, free: true },
+  github:     { input: 0, output: 0, free: true },
+  fireworks:  { input: 0, output: 0, free: true },
+  cohere:     { input: 0, output: 0, free: true },
+  cloudflare: { input: 0, output: 0, free: true },
 };
 
 export async function GET() {

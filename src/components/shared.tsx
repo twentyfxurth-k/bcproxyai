@@ -173,7 +173,7 @@ export function GlowDot({ status }: { status: "available" | "cooldown" | "unknow
 
 export function ProviderBadge({ provider }: { provider: string }) {
   const c = PROVIDER_COLORS[provider] ?? { text: "text-gray-300", bg: "bg-gray-700/40", border: "border-gray-600/40" };
-  const labels: Record<string, string> = { openrouter: "OR", kilo: "Kilo", google: "GG", groq: "Groq", cerebras: "Cerebras", sambanova: "SN", mistral: "Mistral" };
+  const labels: Record<string, string> = { openrouter: "OR", kilo: "Kilo", google: "GG", groq: "Groq", cerebras: "Cerebras", sambanova: "SN", mistral: "Mistral", ollama: "Local", github: "GitHub", fireworks: "FW", cohere: "Cohere", cloudflare: "CF" };
   return (
     <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-bold ${c.text} ${c.bg} border ${c.border}`}>
       {labels[provider] ?? provider}
