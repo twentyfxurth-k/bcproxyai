@@ -4,7 +4,7 @@ services:
     image: bcproxyai
     build: .
     ports:
-      - "3333:3000"
+      - "3334:3000"
     env_file:
       - .env.local
     volumes:

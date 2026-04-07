@@ -42,6 +42,7 @@ import type { AnalyticsData } from "../components/Analytics";
 import { ComplaintPanel } from "../components/ComplaintPanel";
 import { RoutingLearnPanel } from "../components/RoutingLearnPanel";
 import { TrendPanel } from "../components/TrendPanel";
+import { MascotScene } from "../components/MascotScene";
 import { UptimePanel } from "../components/UptimePanel";
 import { CostOptimizerPanel } from "../components/CostOptimizerPanel";
 import { SchoolBellPanel } from "../components/SchoolBellPanel";
@@ -444,6 +445,9 @@ export default function Dashboard() {
       </nav>
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 space-y-16">
+
+        {/* ── Live Mascot Theater (data-driven from gateway logs) ───────── */}
+        <MascotScene />
 
         {/* ── Section 1: Header + Worker Status ──────────────────────────── */}
         <section id="status" className="animate-fade-in-up">

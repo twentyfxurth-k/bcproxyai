@@ -37,6 +37,10 @@ yarn-error.log*
 # database
 /data/
 
+# caddy runtime logs
+caddy.log
+caddy.err.log
+
 # compiled mcp
 /dist/
 
