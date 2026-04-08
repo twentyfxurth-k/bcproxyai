@@ -517,7 +517,8 @@ async function forwardToProvider(
   provider: string,
   actualModelId: string,
   body: Record<string, unknown>,
-  stream: boolean
+  stream: boolean,
+  externalSignal?: AbortSignal
 ): Promise<Response> {
   const url = PROVIDER_URLS[provider];
   if (!url) throw new Error(`Unknown provider: ${provider}`);
@@ -665,11 +666,15 @@ async function forwardToProvider(
 
   // P0-2: 8s per-attempt timeout for cloud providers, 25s for Ollama (local model load time)
   const timeoutMs = provider === "ollama" ? 25_000 : 8_000;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = externalSignal
+    ? AbortSignal.any([timeoutSignal, externalSignal])
+    : timeoutSignal;
   const response = await fetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal,
   });
 
   if (response.status === 429) {
@@ -679,6 +684,30 @@ async function forwardToProvider(
   }
 
   return response;
+}
+
+// Improvement A: parallel hedge for top-2 cloud candidates
+const FAST_STREAM_PROVIDERS_FOR_HEDGE = new Set(["groq", "cerebras", "together"]);
+
+async function hedgeRace(
+  topTwo: ModelRow[],
+  body: Record<string, unknown>,
+  isStream: boolean
+): Promise<{ response: Response; winner: ModelRow; loserIdx: number }> {
+  const controllers = topTwo.map(() => new AbortController());
+
+  const attempts = topTwo.map((candidate, idx) =>
+    forwardToProvider(candidate.provider, candidate.model_id, body, isStream, controllers[idx].signal)
+      .then(res => {
+        if (res.ok) return { response: res, winner: candidate, loserIdx: idx === 0 ? 1 : 0 };
+        throw new Error(`HTTP ${res.status}`);
+      })
+  );
+
+  const result = await Promise.any(attempts);
+  // Cancel the loser
+  controllers.forEach((c, i) => { if (topTwo[i] !== result.winner) c.abort(); });
+  return result;
 }
 
 // Improvement F: probe Ollama /api/ps to see if model is loaded in memory
@@ -1015,7 +1044,73 @@ export async function POST(req: NextRequest) {
 
     const TOTAL_TIMEOUT_MS = 20_000;
 
-    for (let i = 0, tried = 0; i < spreadCandidates.length && tried < MAX_RETRIES; i++) {
+    // Improvement A: parallel hedge top-2 cloud candidates (skip for stream / tools)
+    let hedgeStartIdx = 0;
+    if (
+      !isStream &&
+      !caps.hasTools &&
+      spreadCandidates.length >= 2 &&
+      spreadCandidates[0].provider !== "ollama" &&
+      spreadCandidates[1].provider !== "ollama"
+    ) {
+      const topTwo = spreadCandidates.slice(0, 2);
+      try {
+        const hedgeResult = await hedgeRace(topTwo, body, isStream);
+        const { response: hedgeResp, winner, loserIdx } = hedgeResult;
+        const loser = topTwo[loserIdx];
+        const latency = Date.now() - startTime;
+        console.log(`[HEDGE-WIN] ${winner.provider}/${winner.model_id} vs ${loser.provider}/${loser.model_id} | ${latency}ms`);
+        // Record winner as success, loser as neutral (cancelled)
+        await recordProviderSuccessMem(winner.provider);
+        // Parse and return the hedge winner response
+        try {
+          const cloned = hedgeResp.clone();
+          const json = await cloned.json() as { choices?: Array<{ message?: { content?: string; tool_calls?: unknown[] } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+          let content = json.choices?.[0]?.message?.content ?? "";
+          const hasToolCalls = Array.isArray(json.choices?.[0]?.message?.tool_calls) && (json.choices[0].message!.tool_calls!.length > 0);
+          const badReason = isResponseBad(content, caps.hasTools);
+          if (badReason && !hasToolCalls) {
+            console.log(`[HEDGE-BAD] ${winner.provider}/${winner.model_id} — ${badReason}`);
+            // Fall through to sequential retry
+          } else {
+            if (content && THINK_TAG_RE.test(content)) {
+              content = cleanResponseContent(content);
+              if (json.choices?.[0]?.message) json.choices[0].message.content = content;
+            }
+            const usage = json.usage;
+            await logGateway(modelField, winner.model_id, winner.provider, 200, latency,
+              usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0, null, userMsg, content?.slice(0, 500) ?? null);
+            await recordRoutingResult(winner.id, winner.provider, promptCategory, true, latency);
+            await trackTokenUsage(winner.provider, winner.model_id, usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0);
+            if (content) {
+              setCachedResponse(body, { content, provider: winner.provider, model: winner.model_id }).catch(() => { /* non-critical */ });
+            }
+            const hedgeHeaders = new Headers();
+            hedgeHeaders.set("Content-Type", "application/json");
+            hedgeHeaders.set("X-BCProxy-Provider", winner.provider);
+            hedgeHeaders.set("X-BCProxy-Model", winner.model_id);
+            hedgeHeaders.set("X-BCProxy-Hedge", "true");
+            hedgeHeaders.set("Access-Control-Allow-Origin", "*");
+            console.log(`[RES] 200 | ${winner.provider}/${winner.model_id} | ${latency}ms | hedge | "${_reqMsg}"`);
+            return new Response(JSON.stringify(json), { status: 200, headers: hedgeHeaders });
+          }
+        } catch {
+          // JSON parse failed — fall through to sequential
+        }
+      } catch {
+        // Both hedge candidates failed
+        const latency = Date.now() - startTime;
+        console.log(`[HEDGE-LOSS] both top-2 failed | ${latency}ms — continuing sequential`);
+        await recordProviderFailureMem(topTwo[0].provider);
+        await recordProviderFailureMem(topTwo[1].provider);
+        await recordCircuitFailure(topTwo[0].provider);
+        await recordCircuitFailure(topTwo[1].provider);
+      }
+      // After hedge (win bad-response or loss), skip first 2 in sequential loop
+      hedgeStartIdx = 2;
+    }
+
+    for (let i = hedgeStartIdx, tried = 0; i < spreadCandidates.length && tried < MAX_RETRIES; i++) {
       if (Date.now() - startTime > TOTAL_TIMEOUT_MS) {
         console.log(`[TIMEOUT] Total retry time exceeded ${TOTAL_TIMEOUT_MS}ms — stopping`);
         break;
