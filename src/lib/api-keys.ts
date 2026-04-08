@@ -1,5 +1,5 @@
 // API Key Rotation — round-robin + cooldown on 429
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 
 const keyIndexMap = new Map<string, number>();
 const cooldownMap = new Map<string, number>(); // "provider:key" -> cooldown until timestamp
@@ -23,17 +23,31 @@ const ENV_MAP: Record<string, string> = {
 // Cache DB keys for 30s to avoid hitting DB on every request
 let dbKeysCache: Record<string, string> = {};
 let dbKeysCacheTime = 0;
+let dbKeysFetchInProgress = false;
 
-function getDbKey(provider: string): string {
+async function refreshDbKeys(): Promise<void> {
+  if (dbKeysFetchInProgress) return;
+  dbKeysFetchInProgress = true;
+  try {
+    const sql = getSqlClient();
+    const rows = await sql<{ provider: string; api_key: string }[]>`
+      SELECT provider, api_key FROM api_keys
+    `;
+    dbKeysCache = {};
+    for (const r of rows) dbKeysCache[r.provider] = r.api_key;
+    dbKeysCacheTime = Date.now();
+  } catch {
+    // ignore
+  } finally {
+    dbKeysFetchInProgress = false;
+  }
+}
+
+function getDbKeySync(provider: string): string {
   const now = Date.now();
   if (now - dbKeysCacheTime > 30_000) {
-    try {
-      const db = getDb();
-      const rows = db.prepare("SELECT provider, api_key FROM api_keys").all() as { provider: string; api_key: string }[];
-      dbKeysCache = {};
-      for (const r of rows) dbKeysCache[r.provider] = r.api_key;
-      dbKeysCacheTime = now;
-    } catch { /* ignore */ }
+    // Refresh async, return stale for now
+    refreshDbKeys().catch(() => {});
   }
   return dbKeysCache[provider] ?? "";
 }
@@ -60,7 +74,7 @@ export function getNextApiKey(provider: string): string {
 
   // Fallback to DB key if no env key
   if (envKeys.length === 0) {
-    const dbKey = getDbKey(provider);
+    const dbKey = getDbKeySync(provider);
     if (dbKey) raw = dbKey;
   } else {
     raw = envKeys.join(",");

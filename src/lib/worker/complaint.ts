@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 import { askModel, judgeAnswer } from "./benchmark";
 import { generateNickname } from "./scanner";
 import { emitEvent } from "@/lib/routing-learn";
@@ -40,12 +40,10 @@ const CATEGORY_EXAM_QUESTIONS: Record<string, string[]> = {
 // Score threshold: below this = failed re-exam
 const PASS_THRESHOLD = 5;
 
-function logWorker(step: string, message: string, level = "info") {
+async function logWorker(step: string, message: string, level = "info") {
   try {
-    const db = getDb();
-    db.prepare(
-      "INSERT INTO worker_logs (step, message, level) VALUES (?, ?, ?)"
-    ).run(step, message, level);
+    const sql = getSqlClient();
+    await sql`INSERT INTO worker_logs (step, message, level) VALUES (${step}, ${message}, ${level})`;
   } catch {
     // silent
   }
@@ -63,41 +61,41 @@ export async function processComplaint(
   category: string,
   originalQuestion?: string
 ): Promise<void> {
-  const db = getDb();
+  const sql = getSqlClient();
 
-  logWorker("complaint", `Processing complaint #${complaintId} for ${provider}/${modelId} [${category}]`);
+  await logWorker("complaint", `Processing complaint #${complaintId} for ${provider}/${modelId} [${category}]`);
 
   // Pick a question matching the complaint category
   const questions = CATEGORY_EXAM_QUESTIONS[category] ?? CATEGORY_EXAM_QUESTIONS.wrong_answer;
   const question = originalQuestion
-    ? originalQuestion  // Re-test with the actual question that was complained about
+    ? originalQuestion
     : questions[Math.floor(Math.random() * questions.length)];
 
   // Ask the model
   const { answer, latency, error } = await askModel(provider, modelId, question);
 
   if (error) {
-    logWorker("complaint", `Re-exam failed for ${modelId}: ${error}`, "warn");
+    await logWorker("complaint", `Re-exam failed for ${modelId}: ${error}`, "warn");
 
-    // Insert failed exam
-    db.prepare(`
+    await sql`
       INSERT INTO complaint_exams (complaint_id, model_id, question, answer, score, passed, reasoning, latency_ms)
-      VALUES (?, ?, ?, ?, 0, 0, ?, ?)
-    `).run(complaintId, dbModelId, question, "", `Re-exam error: ${error}`, latency);
+      VALUES (${complaintId}, ${dbModelId}, ${question}, ${''},
+        ${0}, ${0}, ${'Re-exam error: ' + error}, ${latency})
+    `;
 
-    db.prepare("UPDATE complaints SET status = 'exam_failed' WHERE id = ?").run(complaintId);
+    await sql`UPDATE complaints SET status = 'exam_failed' WHERE id = ${complaintId}`;
 
-    // Extend cooldown to 2 hours (failed to even respond)
     const cooldownUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-    db.prepare(
-      "INSERT INTO health_logs (model_id, status, error, cooldown_until, checked_at) VALUES (?, 'complained', ?, ?, datetime('now'))"
-    ).run(dbModelId, `Re-exam failed: ${error}`, cooldownUntil);
+    await sql`
+      INSERT INTO health_logs (model_id, status, error, cooldown_until, checked_at)
+      VALUES (${dbModelId}, 'complained', ${'Re-exam failed: ' + error}, ${cooldownUntil}, now())
+    `;
 
-    // Update benchmark score (penalty)
-    db.prepare(`
+    await sql`
       INSERT INTO benchmark_results (model_id, category, question, answer, score, max_score, reasoning, latency_ms)
-      VALUES (?, 'general', ?, ?, 0, 10, ?, ?)
-    `).run(dbModelId, `[complaint] ${question}`, "", `Complaint re-exam: failed to respond`, latency);
+      VALUES (${dbModelId}, 'general', ${'[complaint] ' + question}, ${''},
+        ${0}, ${10}, ${'Complaint re-exam: failed to respond'}, ${latency})
+    `;
 
     return;
   }
@@ -111,46 +109,50 @@ export async function processComplaint(
   }, answer);
   const passed = score >= PASS_THRESHOLD;
 
-  logWorker(
+  await logWorker(
     "complaint",
     `Re-exam result: ${modelId} scored ${score}/10 on "${question.slice(0, 30)}..." — ${passed ? "PASSED" : "FAILED"}`,
     passed ? "success" : "warn"
   );
 
   // Save exam result
-  db.prepare(`
+  await sql`
     INSERT INTO complaint_exams (complaint_id, model_id, question, answer, score, passed, reasoning, latency_ms)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(complaintId, dbModelId, question, answer.slice(0, 2000), score, passed ? 1 : 0, reasoning, latency);
+    VALUES (${complaintId}, ${dbModelId}, ${question}, ${answer.slice(0, 2000)},
+      ${score}, ${passed ? 1 : 0}, ${reasoning}, ${latency})
+  `;
 
   // Update complaint status
-  db.prepare("UPDATE complaints SET status = ? WHERE id = ?").run(
-    passed ? "exam_passed" : "exam_failed",
-    complaintId
-  );
+  await sql`
+    UPDATE complaints SET status = ${passed ? 'exam_passed' : 'exam_failed'} WHERE id = ${complaintId}
+  `;
 
   // Update benchmark with new score
-  db.prepare(`
+  await sql`
     INSERT INTO benchmark_results (model_id, question, answer, score, max_score, reasoning, latency_ms)
-    VALUES (?, ?, ?, ?, 10, ?, ?)
-  `).run(dbModelId, `[complaint] ${question}`, answer.slice(0, 2000), score, `Complaint re-exam: ${reasoning}`, latency);
+    VALUES (${dbModelId}, ${'[complaint] ' + question}, ${answer.slice(0, 2000)},
+      ${score}, ${10}, ${'Complaint re-exam: ' + reasoning}, ${latency})
+  `;
 
   if (passed) {
     // Passed: clear cooldown, model can resume
-    db.prepare(
-      "DELETE FROM health_logs WHERE model_id = ? AND cooldown_until > datetime('now') AND status = 'complained'"
-    ).run(dbModelId);
-
-    logWorker("complaint", `${modelId} passed re-exam (${score}/10) — cleared cooldown`, "success");
+    await sql`
+      DELETE FROM health_logs WHERE model_id = ${dbModelId} AND cooldown_until > now() AND status = 'complained'
+    `;
+    await logWorker("complaint", `${modelId} passed re-exam (${score}/10) — cleared cooldown`, "success");
   } else {
     // Failed: extend cooldown to 2 hours + score penalty
     const cooldownUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-    db.prepare(
-      "INSERT INTO health_logs (model_id, status, error, cooldown_until, checked_at) VALUES (?, 'complained', ?, ?, datetime('now'))"
-    ).run(dbModelId, `Re-exam failed: ${score}/10`, cooldownUntil);
+    await sql`
+      INSERT INTO health_logs (model_id, status, error, cooldown_until, checked_at)
+      VALUES (${dbModelId}, 'complained', ${'Re-exam failed: ' + score + '/10'}, ${cooldownUntil}, now())
+    `;
 
     // Update nickname to reflect bad behavior
-    const existingNames = (db.prepare("SELECT nickname FROM models WHERE nickname IS NOT NULL").all() as { nickname: string }[]).map(r => r.nickname);
+    const existingNicknameRows = await sql<{ nickname: string }[]>`
+      SELECT nickname FROM models WHERE nickname IS NOT NULL
+    `;
+    const existingNames = existingNicknameRows.map(r => r.nickname);
     const newNickname = await generateNickname(
       modelId,
       provider,
@@ -158,30 +160,34 @@ export async function processComplaint(
       `ถูกร้องเรียนว่า "${getCategoryLabel(category)}" และสอบตก (${score}/10) — ตั้งชื่อที่สะท้อนว่าถูกตำหนิ`
     );
     if (newNickname) {
-      db.prepare("UPDATE models SET nickname = ? WHERE id = ?").run(newNickname, dbModelId);
-      logWorker("complaint", `${modelId} renamed to "${newNickname}" after failing re-exam`, "warn");
+      await sql`UPDATE models SET nickname = ${newNickname} WHERE id = ${dbModelId}`;
+      await logWorker("complaint", `${modelId} renamed to "${newNickname}" after failing re-exam`, "warn");
     }
 
-    logWorker("complaint", `${modelId} failed re-exam (${score}/10) — cooldown extended 2hr`, "warn");
+    await logWorker("complaint", `${modelId} failed re-exam (${score}/10) — cooldown extended 2hr`, "warn");
   }
 
   // Check total daily complaints for blacklist
   const today = new Date().toISOString().slice(0, 10);
-  const dailyCount = db.prepare(
-    "SELECT COUNT(*) as cnt FROM complaints WHERE model_id = ? AND created_at >= ?"
-  ).get(dbModelId, `${today}T00:00:00`) as { cnt: number };
+  const dailyRows = await sql<{ cnt: number }[]>`
+    SELECT COUNT(*) as cnt FROM complaints WHERE model_id = ${dbModelId} AND created_at >= ${today + 'T00:00:00'}::timestamptz
+  `;
+  const dailyCount = dailyRows[0]?.cnt ?? 0;
 
-  if (dailyCount.cnt >= 10) {
+  if (dailyCount >= 10) {
     const cooldownUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    db.prepare(
-      "INSERT INTO health_logs (model_id, status, error, cooldown_until, checked_at) VALUES (?, 'blacklisted', ?, ?, datetime('now'))"
-    ).run(dbModelId, `Blacklisted: ${dailyCount.cnt} complaints today`, cooldownUntil);
+    await sql`
+      INSERT INTO health_logs (model_id, status, error, cooldown_until, checked_at)
+      VALUES (${dbModelId}, 'blacklisted', ${'Blacklisted: ' + dailyCount + ' complaints today'}, ${cooldownUntil}, now())
+    `;
 
-    db.prepare("UPDATE complaints SET status = 'blacklisted' WHERE model_id = ? AND created_at >= ?")
-      .run(dbModelId, `${today}T00:00:00`);
+    await sql`
+      UPDATE complaints SET status = 'blacklisted'
+      WHERE model_id = ${dbModelId} AND created_at >= ${today + 'T00:00:00'}::timestamptz
+    `;
 
-    emitEvent("model_banned", `${modelId} ถูกแบน 24 ชม.`, `ถูกร้องเรียน ${dailyCount.cnt} ครั้งวันนี้`, provider, dbModelId, "error");
-    logWorker("complaint", `${modelId} BLACKLISTED — ${dailyCount.cnt} complaints today`, "error");
+    await emitEvent("model_banned", `${modelId} ถูกแบน 24 ชม.`, `ถูกร้องเรียน ${dailyCount} ครั้งวันนี้`, provider, dbModelId, "error");
+    await logWorker("complaint", `${modelId} BLACKLISTED — ${dailyCount} complaints today`, "error");
   }
 }
 
@@ -202,22 +208,20 @@ function getCategoryLabel(category: string): string {
  * Get complaint reputation score for a model (0-100, lower = more complaints)
  * Used by gateway to deprioritize models with many complaints
  */
-export function getReputationScore(dbModelId: string): number {
+export async function getReputationScore(dbModelId: string): Promise<number> {
   try {
-    const db = getDb();
-    const last7days = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-    const result = db.prepare(`
+    const sql = getSqlClient();
+    const rows = await sql<{ total: number; failed: number }[]>`
       SELECT
         COUNT(*) as total,
         SUM(CASE WHEN status = 'exam_failed' THEN 1 ELSE 0 END) as failed
       FROM complaints
-      WHERE model_id = ? AND created_at >= ?
-    `).get(dbModelId, last7days) as { total: number; failed: number };
+      WHERE model_id = ${dbModelId} AND created_at >= now() - interval '7 days'
+    `;
 
-    if (result.total === 0) return 100; // no complaints = perfect
+    const result = rows[0];
+    if (!result || result.total === 0) return 100;
 
-    // Each complaint reduces reputation by 10, each failed exam by additional 10
     const penalty = result.total * 10 + result.failed * 10;
     return Math.max(0, 100 - penalty);
   } catch {

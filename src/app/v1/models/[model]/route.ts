@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 import { openAIError, toOpenAIModelObject, unixNow } from "@/lib/openai-compat";
 
 export const dynamic = "force-dynamic";
@@ -29,22 +29,22 @@ export async function GET(
       );
     }
 
-    // Search in database: try provider/model_id format first, then model_id
-    const db = getDb();
-    const row = db.prepare(
-      `SELECT m.provider, m.model_id, m.first_seen
-       FROM models m
-       WHERE m.model_id = ? OR (m.provider || '/' || m.model_id) = ?
-       LIMIT 1`
-    ).get(modelId, modelId) as { provider: string; model_id: string; first_seen: string } | undefined;
+    const sql = getSqlClient();
+    const rows = await sql<{ provider: string; model_id: string; first_seen: Date | null }[]>`
+      SELECT m.provider, m.model_id, m.first_seen
+      FROM models m
+      WHERE m.model_id = ${modelId} OR (m.provider || '/' || m.model_id) = ${modelId}
+      LIMIT 1
+    `;
 
-    if (!row) {
+    if (rows.length === 0) {
       return openAIError(404, {
         message: `The model '${modelId}' does not exist`,
         param: "model",
       });
     }
 
+    const row = rows[0];
     const created = row.first_seen
       ? Math.floor(new Date(row.first_seen).getTime() / 1000)
       : unixNow();

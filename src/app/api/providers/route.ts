@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 import { PROVIDER_URLS } from "@/lib/providers";
 
 export const dynamic = "force-dynamic";
@@ -20,42 +20,35 @@ const ENV_MAP: Record<string, string> = {
   huggingface: "HF_TOKEN",
 };
 
-// Ollama doesn't need a key
 const NO_KEY_REQUIRED = new Set(["ollama"]);
 
 export async function GET() {
   try {
-    const db = getDb();
+    const sql = getSqlClient();
 
-    // Count models per provider.
-    // A model is considered available if:
-    //   1. It has NO health_log entry at all (never checked → assume online), OR
-    //   2. Its latest health_log has status='available' AND no active cooldown
-    // A model is offline only when it has an active cooldown (cooldown_until > now).
-    // Simple: model is available unless it has an active cooldown
-    // No health_log = available (default online)
-    const rows = db.prepare(`
+    const rows = await sql<{ provider: string; model_count: number; available_count: number }[]>`
       SELECT m.provider, COUNT(*) as model_count,
         SUM(CASE WHEN m.id NOT IN (
           SELECT h.model_id FROM health_logs h
           INNER JOIN (SELECT model_id, MAX(id) as max_id FROM health_logs GROUP BY model_id) l
             ON h.model_id = l.model_id AND h.id = l.max_id
-          WHERE h.cooldown_until > datetime('now')
+          WHERE h.cooldown_until > now()
         ) THEN 1 ELSE 0 END) as available_count
       FROM models m
       GROUP BY m.provider
-    `).all() as { provider: string; model_count: number; available_count: number }[];
+    `;
 
     const dbMap = new Map(rows.map(r => [r.provider, r]));
 
     // Get DB-stored keys
     const dbKeys = new Map<string, string>();
     try {
-      const keyRows = db.prepare("SELECT provider, api_key FROM api_keys").all() as { provider: string; api_key: string }[];
+      const keyRows = await sql<{ provider: string; api_key: string }[]>`
+        SELECT provider, api_key FROM api_keys
+      `;
       for (const r of keyRows) dbKeys.set(r.provider, r.api_key);
     } catch { /* table may not exist yet */ }
 
-    // Build status for ALL 13 providers
     const ALL_PROVIDERS = Object.keys(PROVIDER_URLS);
     const providers = ALL_PROVIDERS.map(provider => {
       const envVar = ENV_MAP[provider] ?? "";
@@ -64,19 +57,17 @@ export async function GET() {
       const dbKey = dbKeys.get(provider) ?? "";
       const noKeyRequired = NO_KEY_REQUIRED.has(provider);
 
-      // Has key from either source
       const hasEnvKey = envKeys.length > 0;
       const hasDbKey = dbKey.length > 0;
       const hasKey = noKeyRequired || hasEnvKey || hasDbKey;
 
-      // Check for placeholder keys
       const isPlaceholder = hasEnvKey && !hasDbKey && envKeys.every(k =>
         /^(your_|placeholder|xxx|test|dummy)/i.test(k)
       );
 
       const dbRow = dbMap.get(provider);
-      const modelCount = dbRow?.model_count ?? 0;
-      const availableCount = dbRow?.available_count ?? 0;
+      const modelCount = Number(dbRow?.model_count ?? 0);
+      const availableCount = Number(dbRow?.available_count ?? 0);
 
       let status: "active" | "no_key" | "no_models" | "error";
       if (!hasKey || isPlaceholder) {

@@ -1,45 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const db = getDb();
+    const sql = getSqlClient();
 
-    // Get daily limit config
-    const configRow = db
-      .prepare("SELECT value FROM budget_config WHERE key = 'daily_token_limit'")
-      .get() as { value: string } | undefined;
-    const dailyLimit = configRow ? Number(configRow.value) : 1000000;
+    const configRows = await sql<{ value: string }[]>`
+      SELECT value FROM budget_config WHERE key = 'daily_token_limit'
+    `;
+    const dailyLimit = configRows.length > 0 ? Number(configRows[0].value) : 1000000;
 
-    // Get today's usage
     const today = new Date().toISOString().slice(0, 10);
-    const usage = db
-      .prepare(
-        `SELECT
-          COALESCE(SUM(input_tokens), 0) AS input_tokens,
-          COALESCE(SUM(output_tokens), 0) AS output_tokens,
-          COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,
-          COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
-        FROM token_usage
-        WHERE created_at >= ?`
-      )
-      .get(`${today}T00:00:00`) as {
-      input_tokens: number;
-      output_tokens: number;
-      total_tokens: number;
-      estimated_cost_usd: number;
-    };
+    const usageRows = await sql<{
+      input_tokens: number; output_tokens: number;
+      total_tokens: number; estimated_cost_usd: number;
+    }[]>`
+      SELECT
+        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+        COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,
+        COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+      FROM token_usage
+      WHERE created_at >= ${today + 'T00:00:00'}::timestamptz
+    `;
+    const usage = usageRows[0] ?? { input_tokens: 0, output_tokens: 0, total_tokens: 0, estimated_cost_usd: 0 };
 
-    const percentUsed = dailyLimit > 0 ? (usage.total_tokens / dailyLimit) * 100 : 0;
+    const percentUsed = dailyLimit > 0 ? (Number(usage.total_tokens) / dailyLimit) * 100 : 0;
 
     return NextResponse.json({
       dailyLimit,
-      todayUsage: usage.total_tokens,
-      todayInputTokens: usage.input_tokens,
-      todayOutputTokens: usage.output_tokens,
-      estimatedCostUsd: usage.estimated_cost_usd,
+      todayUsage: Number(usage.total_tokens),
+      todayInputTokens: Number(usage.input_tokens),
+      todayOutputTokens: Number(usage.output_tokens),
+      estimatedCostUsd: Number(usage.estimated_cost_usd),
       percentUsed: Math.round(percentUsed * 100) / 100,
     });
   } catch (err) {
@@ -53,16 +48,14 @@ export async function POST(req: NextRequest) {
     const { dailyLimit } = body as { dailyLimit?: number };
 
     if (dailyLimit == null || dailyLimit < 0) {
-      return NextResponse.json(
-        { error: "dailyLimit must be a non-negative number" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "dailyLimit must be a non-negative number" }, { status: 400 });
     }
 
-    const db = getDb();
-    db.prepare(
-      "INSERT OR REPLACE INTO budget_config (key, value) VALUES ('daily_token_limit', ?)"
-    ).run(String(dailyLimit));
+    const sql = getSqlClient();
+    await sql`
+      INSERT INTO budget_config (key, value) VALUES ('daily_token_limit', ${String(dailyLimit)})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `;
 
     return NextResponse.json({ ok: true, dailyLimit });
   } catch (err) {

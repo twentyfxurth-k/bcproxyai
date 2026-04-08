@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 import { getNextApiKey } from "@/lib/api-keys";
 import { emitEvent } from "@/lib/routing-learn";
 
@@ -10,7 +10,7 @@ interface ModelRow {
   context_length: number;
   tier: string;
   description?: string;
-  supports_vision?: number;  // 1 = yes, 0 = no, -1 = unknown
+  supports_vision?: number;
   supports_tools?: number;
   supports_audio_input?: number;
   supports_audio_output?: number;
@@ -107,12 +107,10 @@ export function calcTier(contextLength: number): string {
   return "small";
 }
 
-function logWorker(step: string, message: string, level = "info") {
+async function logWorker(step: string, message: string, level = "info") {
   try {
-    const db = getDb();
-    db.prepare(
-      "INSERT INTO worker_logs (step, message, level) VALUES (?, ?, ?)"
-    ).run(step, message, level);
+    const sql = getSqlClient();
+    await sql`INSERT INTO worker_logs (step, message, level) VALUES (${step}, ${message}, ${level})`;
   } catch {
     // silent
   }
@@ -130,7 +128,6 @@ async function fetchOpenRouterModels(): Promise<ModelRow[]> {
     for (const m of json.data ?? []) {
       if (m.pricing?.prompt !== "0") continue;
       const ctx = m.context_length ?? 0;
-      // OpenRouter provides architecture metadata
       const arch = m.architecture ?? {};
       models.push({
         id: `openrouter:${m.id}`,
@@ -146,7 +143,7 @@ async function fetchOpenRouterModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `OpenRouter fetch error: ${err}`, "error");
+    await logWorker("scan", `OpenRouter fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -181,7 +178,7 @@ async function fetchKiloModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `Kilo fetch error: ${err}`, "error");
+    await logWorker("scan", `Kilo fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -196,11 +193,9 @@ async function fetchGoogleModels(): Promise<ModelRow[]> {
     for (const m of json.models ?? []) {
       const mid: string = (m.name ?? "").replace("models/", "");
       if (!mid) continue;
-      // Only include generative models that support generateContent
       const methods: string[] = m.supportedGenerationMethods ?? [];
       if (!methods.includes("generateContent")) continue;
       const ctx = m.inputTokenLimit ?? 0;
-      // Google API provides supported methods info
       const hasVision = methods.includes("generateContent") && /gemini/i.test(mid);
       models.push({
         id: `google:${mid}`,
@@ -216,7 +211,7 @@ async function fetchGoogleModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `Google fetch error: ${err}`, "error");
+    await logWorker("scan", `Google fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -247,7 +242,7 @@ async function fetchGroqModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `Groq fetch error: ${err}`, "error");
+    await logWorker("scan", `Groq fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -267,7 +262,6 @@ async function fetchCerebrasModels(): Promise<ModelRow[]> {
     const models: ModelRow[] = [];
     for (const m of json.data ?? []) {
       const mid: string = m.id ?? "";
-      // Skip non-chat models (whisper, etc.)
       if (NON_CHAT_KEYWORDS.some((kw) => mid.toLowerCase().includes(kw))) continue;
       const ctx = m.context_window ?? m.context_length ?? m.max_context_length ?? 0;
       models.push({
@@ -284,7 +278,7 @@ async function fetchCerebrasModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `Cerebras fetch error: ${err}`, "error");
+    await logWorker("scan", `Cerebras fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -317,7 +311,7 @@ async function fetchSambaNovaModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `SambaNova fetch error: ${err}`, "error");
+    await logWorker("scan", `SambaNova fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -350,7 +344,7 @@ async function fetchMistralModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `Mistral fetch error: ${err}`, "error");
+    await logWorker("scan", `Mistral fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -367,9 +361,8 @@ async function fetchOllamaModels(): Promise<ModelRow[]> {
     for (const m of json.models ?? []) {
       const name: string = m.name ?? m.model ?? "";
       if (!name) continue;
-      // Ollama: all models support at least 128K context with num_ctx parameter
       const sizeGB = (m.size ?? 0) / (1024 * 1024 * 1024);
-      const ctx = 128000; // Ollama supports large context via num_ctx
+      const ctx = 128000;
       models.push({
         id: `ollama:${name}`,
         name: name,
@@ -384,7 +377,6 @@ async function fetchOllamaModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch {
-    // Ollama ไม่ได้รัน — ข้ามเงียบๆ (ไม่ log error เพราะอาจไม่ได้ติดตั้ง)
     return [];
   }
 }
@@ -419,7 +411,7 @@ async function fetchGitHubModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `GitHub Models fetch error: ${err}`, "error");
+    await logWorker("scan", `GitHub Models fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -454,7 +446,7 @@ async function fetchFireworksModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `Fireworks fetch error: ${err}`, "error");
+    await logWorker("scan", `Fireworks fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -473,7 +465,6 @@ async function fetchCohereModels(): Promise<ModelRow[]> {
     for (const m of json.models ?? json.data ?? []) {
       const mid: string = m.name ?? m.id ?? "";
       if (!mid) continue;
-      // Only chat-capable models
       if (m.endpoints && !m.endpoints.includes("chat")) continue;
       const ctx = m.context_length ?? m.max_tokens ?? 128000;
       models.push({
@@ -490,7 +481,7 @@ async function fetchCohereModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `Cohere fetch error: ${err}`, "error");
+    await logWorker("scan", `Cohere fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -525,7 +516,7 @@ async function fetchCloudflareModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `Cloudflare fetch error: ${err}`, "error");
+    await logWorker("scan", `Cloudflare fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -534,7 +525,6 @@ async function fetchHuggingFaceModels(): Promise<ModelRow[]> {
   const token = getNextApiKey("huggingface");
   if (!token) return [];
   try {
-    // HF Inference API — get featured/recommended text-generation models
     const res = await fetch("https://huggingface.co/api/models?pipeline_tag=text-generation&sort=trending&limit=30&filter=endpoints_compatible", {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(20000),
@@ -546,7 +536,6 @@ async function fetchHuggingFaceModels(): Promise<ModelRow[]> {
       const mid: string = m.id ?? m.modelId ?? "";
       if (!mid) continue;
       if (NON_CHAT_KEYWORDS.some((kw) => mid.toLowerCase().includes(kw))) continue;
-      // Only include models that likely support chat
       const tags: string[] = m.tags ?? [];
       if (!tags.includes("conversational") && !tags.includes("text-generation")) continue;
       const ctx = m.config?.max_position_embeddings ?? 32000;
@@ -564,7 +553,7 @@ async function fetchHuggingFaceModels(): Promise<ModelRow[]> {
     }
     return models;
   } catch (err) {
-    logWorker("scan", `HuggingFace fetch error: ${err}`, "error");
+    await logWorker("scan", `HuggingFace fetch error: ${err}`, "error");
     return [];
   }
 }
@@ -606,8 +595,8 @@ export async function generateNickname(modelName: string, provider: string, exis
 }
 
 export async function scanModels(): Promise<{ found: number; new: number; disappeared: number }> {
-  logWorker("scan", "Starting model scan");
-  const db = getDb();
+  await logWorker("scan", "Starting model scan");
+  const sql = getSqlClient();
 
   const [orModels, kiloModels, googleModels, groqModels, cerebrasModels, sambaNovaModels, mistralModels, ollamaModels, githubModels, fireworksModels, cohereModels, cloudflareModels, hfModels] = await Promise.all([
     fetchOpenRouterModels(),
@@ -629,108 +618,99 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
   const foundIds = new Set(allModels.map(m => m.id));
   let newCount = 0;
 
-  const insertStmt = db.prepare(`
-    INSERT OR IGNORE INTO models (id, name, provider, model_id, context_length, tier, description,
-      supports_vision, supports_tools, supports_audio_input, supports_audio_output,
-      supports_image_gen, supports_embedding, supports_json_mode, supports_reasoning, supports_code,
-      max_output_tokens, pricing_input, pricing_output)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const updateStmt = db.prepare(`
-    UPDATE models SET last_seen = datetime('now'), context_length = ?, tier = ?,
-      supports_vision = ?, supports_tools = ?, supports_audio_input = ?, supports_audio_output = ?,
-      supports_image_gen = ?, supports_embedding = ?, supports_json_mode = ?, supports_reasoning = ?, supports_code = ?,
-      max_output_tokens = ?, pricing_input = ?, pricing_output = ?
-    WHERE id = ?
-  `);
-
   const newModels: ModelRow[] = [];
 
-  const upsertMany = db.transaction((models: ModelRow[]) => {
-    for (const m of models) {
-      const caps = detectCaps(m.model_id, m.name);
-      const result = insertStmt.run(
-        m.id, m.name, m.provider, m.model_id, m.context_length, m.tier, m.description ?? null,
-        m.supports_vision ?? -1, m.supports_tools ?? -1,
-        caps.supports_audio_input ?? 0, caps.supports_audio_output ?? 0,
-        caps.supports_image_gen ?? 0, caps.supports_embedding ?? 0,
-        caps.supports_json_mode ?? 0, caps.supports_reasoning ?? 0, caps.supports_code ?? 0,
-        m.max_output_tokens ?? 0, m.pricing_input ?? 0, m.pricing_output ?? 0
-      );
-      if (result.changes > 0) {
+  // Upsert models one at a time (postgres tagged templates don't support batch upsert cleanly)
+  for (const m of allModels) {
+    const caps = detectCaps(m.model_id, m.name);
+    try {
+      const result = await sql<{ xmax: string }[]>`
+        INSERT INTO models (id, name, provider, model_id, context_length, tier, description,
+          supports_vision, supports_tools, supports_audio_input, supports_audio_output,
+          supports_image_gen, supports_embedding, supports_json_mode, supports_reasoning, supports_code,
+          max_output_tokens, pricing_input, pricing_output)
+        VALUES (
+          ${m.id}, ${m.name}, ${m.provider}, ${m.model_id}, ${m.context_length}, ${m.tier},
+          ${m.description ?? null},
+          ${m.supports_vision ?? -1}, ${m.supports_tools ?? -1},
+          ${caps.supports_audio_input ?? 0}, ${caps.supports_audio_output ?? 0},
+          ${caps.supports_image_gen ?? 0}, ${caps.supports_embedding ?? 0},
+          ${caps.supports_json_mode ?? 0}, ${caps.supports_reasoning ?? 0}, ${caps.supports_code ?? 0},
+          ${m.max_output_tokens ?? 0}, ${m.pricing_input ?? 0}, ${m.pricing_output ?? 0}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          last_seen = now(), context_length = EXCLUDED.context_length, tier = EXCLUDED.tier,
+          supports_vision = EXCLUDED.supports_vision, supports_tools = EXCLUDED.supports_tools,
+          supports_audio_input = EXCLUDED.supports_audio_input, supports_audio_output = EXCLUDED.supports_audio_output,
+          supports_image_gen = EXCLUDED.supports_image_gen, supports_embedding = EXCLUDED.supports_embedding,
+          supports_json_mode = EXCLUDED.supports_json_mode, supports_reasoning = EXCLUDED.supports_reasoning,
+          supports_code = EXCLUDED.supports_code, max_output_tokens = EXCLUDED.max_output_tokens,
+          pricing_input = EXCLUDED.pricing_input, pricing_output = EXCLUDED.pricing_output
+        RETURNING (xmax = 0) as inserted
+      `;
+      // xmax=0 means it was a fresh INSERT (not UPDATE)
+      const inserted = (result as unknown as Array<{ inserted: boolean }>)[0]?.inserted;
+      if (inserted) {
         newCount++;
         newModels.push(m);
-        emitEvent("model_new", `โมเดลใหม่: ${m.name}`, `${m.provider} — ${calcTier(m.context_length).toUpperCase()} ${m.context_length >= 1000 ? Math.round(m.context_length/1000)+"K" : m.context_length} ctx`, m.provider, m.id, "success");
-        logWorker("scan", `🆕 โมเดลใหม่: ${m.name} (${m.provider}) — ${calcTier(m.context_length).toUpperCase()} ${m.context_length >= 1000 ? Math.round(m.context_length/1000)+"K" : m.context_length} ctx`, "success");
-      } else {
-        updateStmt.run(m.context_length, m.tier,
-          m.supports_vision ?? -1, m.supports_tools ?? -1,
-          caps.supports_audio_input ?? 0, caps.supports_audio_output ?? 0,
-          caps.supports_image_gen ?? 0, caps.supports_embedding ?? 0,
-          caps.supports_json_mode ?? 0, caps.supports_reasoning ?? 0, caps.supports_code ?? 0,
-          m.max_output_tokens ?? 0, m.pricing_input ?? 0, m.pricing_output ?? 0,
-          m.id);
+        await emitEvent("model_new", `โมเดลใหม่: ${m.name}`, `${m.provider} — ${calcTier(m.context_length).toUpperCase()} ${m.context_length >= 1000 ? Math.round(m.context_length/1000)+"K" : m.context_length} ctx`, m.provider, m.id, "success");
+        await logWorker("scan", `🆕 โมเดลใหม่: ${m.name} (${m.provider}) — ${calcTier(m.context_length).toUpperCase()} ${m.context_length >= 1000 ? Math.round(m.context_length/1000)+"K" : m.context_length} ctx`, "success");
       }
+    } catch (err) {
+      await logWorker("scan", `DB upsert error for ${m.id}: ${err}`, "error");
     }
-  });
-
-  try {
-    upsertMany(allModels);
-  } catch (err) {
-    logWorker("scan", `DB upsert error: ${err}`, "error");
   }
 
   // ให้ DeepSeek ตั้งชื่อเล่นให้โมเดลที่ยังไม่มี nickname (max 10 ต่อรอบ ประหยัด token)
   if (DEEPSEEK_API_KEY) {
-    const unnamed = db.prepare(
-      "SELECT id, name, provider FROM models WHERE nickname IS NULL AND context_length >= 32000 LIMIT 10"
-    ).all() as { id: string; name: string; provider: string }[];
+    const unnamed = await sql<{ id: string; name: string; provider: string }[]>`
+      SELECT id, name, provider FROM models WHERE nickname IS NULL AND context_length >= 32000 LIMIT 10
+    `;
 
     if (unnamed.length > 0) {
-      const updateNickname = db.prepare("UPDATE models SET nickname = ? WHERE id = ?");
-      const existingNicknames = (db.prepare("SELECT nickname FROM models WHERE nickname IS NOT NULL").all() as { nickname: string }[]).map(r => r.nickname);
+      const existingNicknameRows = await sql<{ nickname: string }[]>`
+        SELECT nickname FROM models WHERE nickname IS NOT NULL
+      `;
+      const existingNicknames = existingNicknameRows.map(r => r.nickname);
 
       for (const m of unnamed) {
         const nickname = await generateNickname(m.name, m.provider, existingNicknames);
         if (nickname && !existingNicknames.includes(nickname)) {
           try {
-            updateNickname.run(nickname, m.id);
+            await sql`UPDATE models SET nickname = ${nickname} WHERE id = ${m.id}`;
             existingNicknames.push(nickname);
-            logWorker("scan", `🎭 ตั้งชื่อ: ${m.name} → "${nickname}"`, "success");
+            await logWorker("scan", `🎭 ตั้งชื่อ: ${m.name} → "${nickname}"`, "success");
           } catch { /* silent */ }
         }
       }
     }
   }
 
-  // ตรวจจับ model ที่หายไป — ไม่เจอใน scan นี้ แต่เคย last_seen ภายใน 24 ชม.
-  // ถ้า last_seen เกิน 48 ชม. = หายไปถาวร
+  // ตรวจจับ model ที่หายไป
   let disappearedCount = 0;
   try {
-    const recentModels = db.prepare(`
+    const recentModels = await sql<{ id: string; name: string; provider: string; last_seen: Date }[]>`
       SELECT id, name, provider, last_seen FROM models
-      WHERE last_seen < datetime('now', '-1 hour')
-    `).all() as Array<{ id: string; name: string; provider: string; last_seen: string }>;
+      WHERE last_seen < now() - interval '1 hour'
+    `;
 
     for (const m of recentModels) {
-      if (foundIds.has(m.id)) continue; // ยังอยู่
+      if (foundIds.has(m.id)) continue;
 
-      const lastSeen = new Date(m.last_seen + "Z");
+      const lastSeen = new Date(m.last_seen);
       const hoursAgo = (Date.now() - lastSeen.getTime()) / (1000 * 60 * 60);
 
       if (hoursAgo >= 48) {
-        // หายไปถาวร (>48 ชม.)
-        logWorker("scan", `💀 หายถาวร: ${m.name} (${m.provider}) — ไม่เจอมา ${Math.round(hoursAgo)} ชม.`, "error");
+        await logWorker("scan", `💀 หายถาวร: ${m.name} (${m.provider}) — ไม่เจอมา ${Math.round(hoursAgo)} ชม.`, "error");
         disappearedCount++;
       } else if (hoursAgo >= 2) {
-        // หายไปชั่วคราว (2-48 ชม.)
-        logWorker("scan", `⚠️ หายชั่วคราว: ${m.name} (${m.provider}) — ไม่เจอมา ${Math.round(hoursAgo)} ชม.`, "warn");
+        await logWorker("scan", `⚠️ หายชั่วคราว: ${m.name} (${m.provider}) — ไม่เจอมา ${Math.round(hoursAgo)} ชม.`, "warn");
       }
     }
   } catch { /* silent */ }
 
   const msg = `Scan: พบ ${allModels.length} (OR=${orModels.length}, Kilo=${kiloModels.length}, Google=${googleModels.length}, Groq=${groqModels.length}, Cerebras=${cerebrasModels.length}, SN=${sambaNovaModels.length}, Mistral=${mistralModels.length}, Ollama=${ollamaModels.length}, GitHub=${githubModels.length}, FW=${fireworksModels.length}, Cohere=${cohereModels.length}, CF=${cloudflareModels.length}, HF=${hfModels.length}) | ใหม่ ${newCount} | หายไป ${disappearedCount}`;
-  logWorker("scan", msg);
+  await logWorker("scan", msg);
 
   return { found: allModels.length, new: newCount, disappeared: disappearedCount };
 }

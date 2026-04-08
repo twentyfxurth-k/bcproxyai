@@ -10,7 +10,8 @@
     "build:mcp": "tsc -p tsconfig.mcp.json",
     "mcp": "node dist/mcp/server.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "migrate:data": "tsx scripts/migrate-sqlite-to-pg.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.49",
@@ -34,9 +35,12 @@
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^4.1.2",
+    "drizzle-orm": "^0.45.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
+    "postgres": "^3.4.9",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.1.2"
   }

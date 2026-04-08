@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 import { getNextApiKey } from "@/lib/api-keys";
 import { PROVIDER_COMPLETIONS_URLS } from "@/lib/providers";
 import { openAIError } from "@/lib/openai-compat";
@@ -25,44 +25,44 @@ export async function POST(req: NextRequest) {
     const isStream = body.stream === true;
     const prompt = body.prompt as string | string[] | undefined;
 
-    // Find a model that supports completions
-    const db = getDb();
+    const sql = getSqlClient();
     const now = new Date().toISOString();
 
-    // Try direct provider completions first
     const providersWithCompletions = Object.keys(PROVIDER_COMPLETIONS_URLS);
 
-    // Get available models from providers that support legacy completions
-    const models = db.prepare(`
+    const models = await sql<{ id: string; provider: string; model_id: string }[]>`
       SELECT m.id, m.provider, m.model_id
       FROM models m
       LEFT JOIN (
         SELECT hl.model_id, hl.status, hl.cooldown_until
         FROM health_logs hl
         INNER JOIN (
-          SELECT model_id, MAX(checked_at) as max_checked FROM health_logs GROUP BY model_id
-        ) latest ON hl.model_id = latest.model_id AND hl.checked_at = latest.max_checked
+          SELECT model_id, MAX(id) as max_id FROM health_logs GROUP BY model_id
+        ) latest ON hl.model_id = latest.model_id AND hl.id = latest.max_id
       ) h ON m.id = h.model_id
       WHERE (h.status IS NULL OR h.status = 'available')
-        AND (h.cooldown_until IS NULL OR h.cooldown_until < ?)
-        AND m.provider IN (${providersWithCompletions.map(() => "?").join(",")})
+        AND (h.cooldown_until IS NULL OR h.cooldown_until < ${now}::timestamptz)
+        AND m.provider = ANY(${providersWithCompletions})
       ORDER BY RANDOM()
       LIMIT 5
-    `).all(now, ...providersWithCompletions) as { id: string; provider: string; model_id: string }[];
+    `;
+
+    const modelList = [...models];
 
     // If specific model requested, try to find it
     if (modelField !== "auto" && modelField !== "bcproxy/auto") {
-      const specific = db.prepare(
-        "SELECT id, provider, model_id FROM models WHERE id = ? OR model_id = ? LIMIT 1"
-      ).get(modelField, modelField) as { id: string; provider: string; model_id: string } | undefined;
-
-      if (specific) {
-        models.unshift(specific);
+      const specific = await sql<{ id: string; provider: string; model_id: string }[]>`
+        SELECT id, provider, model_id FROM models
+        WHERE id = ${modelField} OR model_id = ${modelField}
+        LIMIT 1
+      `;
+      if (specific.length > 0) {
+        modelList.unshift(specific[0]);
       }
     }
 
     // Try each model
-    for (const model of models) {
+    for (const model of modelList) {
       const url = PROVIDER_COMPLETIONS_URLS[model.provider];
       if (!url) continue;
 
@@ -97,7 +97,6 @@ export async function POST(req: NextRequest) {
           }
 
           const json = await response.json();
-          // Ensure standard fields
           json.id = json.id ?? `cmpl-${crypto.randomBytes(12).toString("base64url")}`;
           json.object = "text_completion";
           json.created = json.created ?? Math.floor(Date.now() / 1000);
@@ -120,7 +119,6 @@ export async function POST(req: NextRequest) {
       temperature: body.temperature ?? 0,
     };
 
-    // Forward to our own chat/completions endpoint
     const chatResponse = await fetch(new URL("/v1/chat/completions", req.url), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -133,14 +131,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (isStream && chatResponse.body) {
-      // Transform SSE from chat format to completions format
       const headers = new Headers();
       headers.set("Content-Type", "text/event-stream");
       headers.set("Access-Control-Allow-Origin", "*");
       return new Response(chatResponse.body, { status: 200, headers });
     }
 
-    // Transform chat response to completions format
     const chatJson = await chatResponse.json();
     const content = chatJson.choices?.[0]?.message?.content ?? "";
 
@@ -158,14 +154,14 @@ export async function POST(req: NextRequest) {
       usage: chatJson.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     };
 
-    const headers = new Headers();
-    headers.set("Content-Type", "application/json");
-    headers.set("Access-Control-Allow-Origin", "*");
+    const responseHeaders = new Headers();
+    responseHeaders.set("Content-Type", "application/json");
+    responseHeaders.set("Access-Control-Allow-Origin", "*");
     if (chatResponse.headers.get("X-BCProxy-Provider")) {
-      headers.set("X-BCProxy-Provider", chatResponse.headers.get("X-BCProxy-Provider")!);
+      responseHeaders.set("X-BCProxy-Provider", chatResponse.headers.get("X-BCProxy-Provider")!);
     }
 
-    return new Response(JSON.stringify(completionResponse), { status: 200, headers });
+    return new Response(JSON.stringify(completionResponse), { status: 200, headers: responseHeaders });
   } catch (err) {
     console.error("[completions] error:", err);
     return openAIError(500, { message: String(err) });

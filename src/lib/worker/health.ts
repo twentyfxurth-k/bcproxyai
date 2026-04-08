@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 import { getNextApiKey } from "@/lib/api-keys";
 import { PROVIDER_URLS } from "@/lib/providers";
 
@@ -12,12 +12,10 @@ const NON_CHAT_KEYWORDS = [
   "allam",
 ];
 
-function logWorker(step: string, message: string, level = "info") {
+async function logWorker(step: string, message: string, level = "info") {
   try {
-    const db = getDb();
-    db.prepare(
-      "INSERT INTO worker_logs (step, message, level) VALUES (?, ?, ?)"
-    ).run(step, message, level);
+    const sql = getSqlClient();
+    await sql`INSERT INTO worker_logs (step, message, level) VALUES (${step}, ${message}, ${level})`;
   } catch {
     // silent
   }
@@ -84,6 +82,11 @@ export async function pingModel(
 
     if (isRateLimit) {
       return { status: "rate_limited", latency, error: `429 rate limited` };
+    }
+
+    // 402 = payment required / quota exhausted → long cooldown, ต่างจาก transient error
+    if (res.status === 402) {
+      return { status: "quota_exhausted", latency, error: `402 quota exhausted: ${text.slice(0, 200)}` };
     }
 
     return {
@@ -251,49 +254,33 @@ export async function checkHealth(): Promise<{
   available: number;
   cooldown: number;
 }> {
-  logWorker("health", "Starting health check");
-  const db = getDb();
+  await logWorker("health", "Starting health check");
+  const sql = getSqlClient();
 
   // Get models eligible for health check
-  const models = db
-    .prepare(
-      `
-    SELECT m.id, m.provider, m.model_id, m.context_length, COALESCE(m.supports_tools, -1) AS supports_tools, COALESCE(m.supports_vision, -1) AS supports_vision
+  const models = await sql<DbModel[]>`
+    SELECT m.id, m.provider, m.model_id, m.context_length,
+      COALESCE(m.supports_tools, -1) AS supports_tools,
+      COALESCE(m.supports_vision, -1) AS supports_vision
     FROM models m
     WHERE m.context_length >= 32000
       AND NOT EXISTS (
         SELECT 1 FROM health_logs h
         WHERE h.model_id = m.id
           AND h.cooldown_until IS NOT NULL
-          AND h.cooldown_until > datetime('now')
-        ORDER BY h.checked_at DESC
+          AND h.cooldown_until > now()
         LIMIT 1
       )
-  `
-    )
-    .all() as DbModel[];
+  `;
 
   // Filter out non-chat models
   const eligible = models.filter((m) => !isNonChatModel(m.model_id));
 
-  logWorker("health", `Checking ${eligible.length} eligible models`);
+  await logWorker("health", `Checking ${eligible.length} eligible models`);
 
   let available = 0;
   let cooldownCount = 0;
   let checked = 0;
-
-  const insertLog = db.prepare(`
-    INSERT INTO health_logs (model_id, status, latency_ms, error, cooldown_until)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-  const updateToolSupport = db.prepare(
-    "UPDATE models SET supports_tools = ? WHERE id = ?"
-  );
-
-  const updateVisionSupport = db.prepare(
-    "UPDATE models SET supports_vision = ? WHERE id = ?"
-  );
 
   // Collect available models that need tool/vision testing
   const availableForToolTest: DbModel[] = [];
@@ -304,10 +291,13 @@ export async function checkHealth(): Promise<{
     checked++;
 
     let cooldownUntil: string | null = null;
-    if (result.status === "rate_limited" || result.status === "error") {
+    if (result.status === "quota_exhausted") {
+      // Quota หมด → cooldown 24 ชม.
+      cooldownUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      cooldownCount++;
+    } else if (result.status === "rate_limited" || result.status === "error") {
       // cooldown_until = now + 2 hours
-      const t = new Date(Date.now() + 2 * 60 * 60 * 1000);
-      cooldownUntil = t.toISOString().replace("T", " ").slice(0, 19);
+      cooldownUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
       cooldownCount++;
     } else {
       available++;
@@ -320,15 +310,12 @@ export async function checkHealth(): Promise<{
     }
 
     try {
-      insertLog.run(
-        model.id,
-        result.status,
-        result.latency,
-        result.error ?? null,
-        cooldownUntil
-      );
+      await sql`
+        INSERT INTO health_logs (model_id, status, latency_ms, error, cooldown_until)
+        VALUES (${model.id}, ${result.status}, ${result.latency}, ${result.error ?? null}, ${cooldownUntil})
+      `;
     } catch (err) {
-      logWorker("health", `DB insert error for ${model.id}: ${err}`, "error");
+      await logWorker("health", `DB insert error for ${model.id}: ${err}`, "error");
     }
   });
 
@@ -338,14 +325,14 @@ export async function checkHealth(): Promise<{
     const supportsTools = await testToolSupport(model);
     if (supportsTools !== -1) {
       try {
-        updateToolSupport.run(supportsTools, model.id);
+        await sql`UPDATE models SET supports_tools = ${supportsTools} WHERE id = ${model.id}`;
         const icon = supportsTools === 1 ? "✅" : "❌";
-        logWorker(
+        await logWorker(
           "health",
           `🔧 ${model.model_id}: tools ${icon}`
         );
       } catch (err) {
-        logWorker("health", `Tool update error for ${model.id}: ${err}`, "error");
+        await logWorker("health", `Tool update error for ${model.id}: ${err}`, "error");
       }
     }
   }
@@ -356,20 +343,20 @@ export async function checkHealth(): Promise<{
     const supportsVision = await testVisionSupport(model);
     if (supportsVision !== -1) {
       try {
-        updateVisionSupport.run(supportsVision, model.id);
+        await sql`UPDATE models SET supports_vision = ${supportsVision} WHERE id = ${model.id}`;
         const icon = supportsVision === 1 ? "✅" : "❌";
-        logWorker(
+        await logWorker(
           "health",
           `👁️ ${model.model_id}: vision ${icon}`
         );
       } catch (err) {
-        logWorker("health", `Vision update error for ${model.id}: ${err}`, "error");
+        await logWorker("health", `Vision update error for ${model.id}: ${err}`, "error");
       }
     }
   }
 
   const msg = `Health check done: checked=${checked}, available=${available}, cooldown=${cooldownCount}`;
-  logWorker("health", msg);
+  await logWorker("health", msg);
 
   return { checked, available, cooldown: cooldownCount };
 }

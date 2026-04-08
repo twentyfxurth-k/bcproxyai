@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -8,15 +8,12 @@ const VALID_PROVIDERS = new Set([
   "mistral", "ollama", "github", "fireworks", "cohere", "cloudflare", "huggingface",
 ]);
 
-// GET: return saved keys (masked) + which providers have DB keys
 export async function GET() {
   try {
-    const db = getDb();
-    const rows = db.prepare("SELECT provider, api_key, updated_at FROM api_keys").all() as {
-      provider: string;
-      api_key: string;
-      updated_at: string;
-    }[];
+    const sql = getSqlClient();
+    const rows = await sql<{ provider: string; api_key: string; updated_at: Date }[]>`
+      SELECT provider, api_key, updated_at FROM api_keys
+    `;
 
     const result = rows.map((r) => ({
       provider: r.provider,
@@ -32,7 +29,6 @@ export async function GET() {
   }
 }
 
-// POST: save or delete a key
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -42,20 +38,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
     }
 
-    const db = getDb();
+    const sql = getSqlClient();
 
     if (!apiKey || apiKey.trim() === "") {
-      // Delete key
-      db.prepare("DELETE FROM api_keys WHERE provider = ?").run(provider);
+      await sql`DELETE FROM api_keys WHERE provider = ${provider}`;
       return NextResponse.json({ ok: true, action: "deleted" });
     }
 
-    // Upsert key
-    db.prepare(`
+    await sql`
       INSERT INTO api_keys (provider, api_key, updated_at)
-      VALUES (?, ?, datetime('now'))
-      ON CONFLICT(provider) DO UPDATE SET api_key = excluded.api_key, updated_at = datetime('now')
-    `).run(provider, apiKey.trim());
+      VALUES (${provider}, ${apiKey.trim()}, now())
+      ON CONFLICT (provider) DO UPDATE SET api_key = EXCLUDED.api_key, updated_at = now()
+    `;
 
     return NextResponse.json({ ok: true, action: "saved" });
   } catch (err) {

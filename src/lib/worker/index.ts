@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db/schema";
+import { getSqlClient } from "@/lib/db/schema";
 import { scanModels } from "./scanner";
 import { checkHealth } from "./health";
 import { runBenchmarks } from "./benchmark";
@@ -21,109 +21,104 @@ export interface WorkerStatus {
 let workerTimer: ReturnType<typeof setInterval> | null = null;
 let isRunning = false;
 
-function getState(key: string): string | null {
+async function getState(key: string): Promise<string | null> {
   try {
-    const db = getDb();
-    const row = db
-      .prepare("SELECT value FROM worker_state WHERE key = ?")
-      .get(key) as { value: string } | undefined;
-    return row?.value ?? null;
+    const sql = getSqlClient();
+    const rows = await sql<{ value: string }[]>`
+      SELECT value FROM worker_state WHERE key = ${key}
+    `;
+    return rows[0]?.value ?? null;
   } catch {
     return null;
   }
 }
 
-function setState(key: string, value: string) {
+async function setState(key: string, value: string): Promise<void> {
   try {
-    const db = getDb();
-    db.prepare(
-      "INSERT OR REPLACE INTO worker_state (key, value) VALUES (?, ?)"
-    ).run(key, value);
+    const sql = getSqlClient();
+    await sql`
+      INSERT INTO worker_state (key, value) VALUES (${key}, ${value})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `;
   } catch {
     // silent
   }
 }
 
-function logWorker(step: string, message: string, level = "info") {
+async function logWorker(step: string, message: string, level = "info"): Promise<void> {
   try {
-    const db = getDb();
-    db.prepare(
-      "INSERT INTO worker_logs (step, message, level) VALUES (?, ?, ?)"
-    ).run(step, message, level);
+    const sql = getSqlClient();
+    await sql`
+      INSERT INTO worker_logs (step, message, level) VALUES (${step}, ${message}, ${level})
+    `;
   } catch {
     // silent
   }
 }
 
-function cleanOldLogs(): void {
+async function cleanOldLogs(): Promise<void> {
   try {
-    const db = getDb();
-    const workerResult = db
-      .prepare("DELETE FROM worker_logs WHERE created_at < datetime('now', '-30 days')")
-      .run();
-    const healthResult = db
-      .prepare("DELETE FROM health_logs WHERE checked_at < datetime('now', '-30 days')")
-      .run();
-    const gatewayResult = db
-      .prepare("DELETE FROM gateway_logs WHERE created_at < datetime('now', '-30 days')")
-      .run();
-    logWorker(
+    const sql = getSqlClient();
+    const workerResult = await sql`DELETE FROM worker_logs WHERE created_at < now() - interval '30 days'`;
+    const healthResult = await sql`DELETE FROM health_logs WHERE checked_at < now() - interval '30 days'`;
+    const gatewayResult = await sql`DELETE FROM gateway_logs WHERE created_at < now() - interval '30 days'`;
+    await logWorker(
       "cleanup",
-      `🧹 ลบ log เก่า: worker ${workerResult.changes}, health ${healthResult.changes}, gateway ${gatewayResult.changes} แถว`
+      `🧹 ลบ log เก่า: worker ${workerResult.count}, health ${healthResult.count}, gateway ${gatewayResult.count} แถว`
     );
   } catch (err) {
-    logWorker("cleanup", `Log cleanup failed: ${err}`, "error");
+    await logWorker("cleanup", `Log cleanup failed: ${err}`, "error");
   }
 }
 
 export async function runWorkerCycle(): Promise<void> {
   if (isRunning) {
-    logWorker("worker", "Cycle skipped — already running", "warn");
+    await logWorker("worker", "Cycle skipped — already running", "warn");
     return;
   }
 
   isRunning = true;
-  setState("status", "running");
-  setState("last_run", new Date().toISOString());
+  await setState("status", "running");
+  await setState("last_run", new Date().toISOString());
 
   const next = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-  setState("next_run", next);
+  await setState("next_run", next);
 
-  logWorker("worker", "Worker cycle started");
+  await logWorker("worker", "Worker cycle started");
 
   // Clean old logs before scanning
-  cleanOldLogs();
+  await cleanOldLogs();
 
   let scanResult = { found: 0, new: 0 };
   let healthResult = { checked: 0, available: 0, cooldown: 0 };
-  let benchmarkResult = { tested: 0, questions: 0 };
+  const benchmarkResult = { tested: 0, questions: 0 };
 
   try {
     // Step 1: Scan
-    logWorker("worker", "Step 1: Scanning models");
+    await logWorker("worker", "Step 1: Scanning models");
     scanResult = await scanModels();
   } catch (err) {
-    logWorker("worker", `Step 1 (scan) failed: ${err}`, "error");
+    await logWorker("worker", `Step 1 (scan) failed: ${err}`, "error");
   }
 
   try {
     // Step 2: Health check
-    logWorker("worker", "Step 2: Health check");
+    await logWorker("worker", "Step 2: Health check");
     healthResult = await checkHealth();
   } catch (err) {
-    logWorker("worker", `Step 2 (health) failed: ${err}`, "error");
+    await logWorker("worker", `Step 2 (health) failed: ${err}`, "error");
   }
 
   // Step 3: Benchmark — DISABLED (วัดจากการทำงานจริงแทน)
   // benchmarkResult = await runBenchmarks();
 
-  setState("status", "idle");
-  setState(
+  await setState("status", "idle");
+  await setState(
     "last_stats",
     JSON.stringify({ scan: scanResult, health: healthResult, benchmark: benchmarkResult })
   );
 
-  logWorker(
+  await logWorker(
     "worker",
     `Cycle complete — scan:${scanResult.found}/${scanResult.new} health:${healthResult.available}/${healthResult.checked} benchmark:${benchmarkResult.tested}/${benchmarkResult.questions}`
   );
@@ -153,11 +148,11 @@ export function startWorker(): void {
   }, 60 * 60 * 1000);
 }
 
-export function getWorkerStatus(): WorkerStatus {
-  const status = (getState("status") ?? "idle") as WorkerStatus["status"];
-  const lastRun = getState("last_run");
-  const nextRun = getState("next_run");
-  const statsRaw = getState("last_stats");
+export async function getWorkerStatus(): Promise<WorkerStatus> {
+  const status = ((await getState("status")) ?? "idle") as WorkerStatus["status"];
+  const lastRun = await getState("last_run");
+  const nextRun = await getState("next_run");
+  const statsRaw = await getState("last_stats");
 
   let stats: WorkerStatus["stats"] = {};
   if (statsRaw) {
