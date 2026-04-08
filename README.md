@@ -29,7 +29,8 @@
 
 - 🎯 **Smart Routing** — เลือก provider/model ที่เหมาะกับ prompt อัตโนมัติ ตามประเภทคำถาม (coding/translation/reasoning/general)
 - 🏥 **Health Monitoring** — ping ทุก provider ทุกชั่วโมง, cooldown 15 นาที เมื่อ fail
-- 📊 **Live Theater** — banner แอนิเมชั่น 🦐🦞 ดึงจากสมุดจดงาน (gateway logs) จริง พร้อม confetti/tear effects
+- ⚔️ **Battle Theater** — แบนเนอร์ Thai Matrix + ฝนตัวอักษรไทย + พระเอก 🦸 vs ผู้ร้าย 👿 สู้กันตาม event จริง พร้อม damage numbers, battle cry, shockwave, speed lines
+- 🎒 **School Roster** — นักเรียนใหม่ย้ายมา · โดดเรียน · ลาออก · โดนไล่ออก (แยกตามช่วงเวลาหายตัว)
 - 🗓️ **Score Heatmap** — ตารางเกรด provider × วัน 14 วัน, สีบอกระดับทันที
 - 🏆 **Leaderboard** — อันดับ provider พร้อม animation count-up + medal
 - 📈 **Stacked Area** — สัดส่วน traffic per provider per day
@@ -159,8 +160,9 @@ OLLAMA_API_KEY=ollama
 
 | # | Section ID | ชื่อ | คำอธิบาย |
 |---|------------|------|----------|
-| — | (top) | 🎬 **Mascot Theater** | Banner แอนิเมชั่น 🦐🦞 ดึง gateway logs จริง พร้อม live stats |
+| — | (top) | ⚔️ **Battle Theater** | Thai Matrix digital rain + พระเอก 🦸 vs ผู้ร้าย 👿 สู้กันตาม event จริง (strike/recoil/idle) พร้อม damage numbers + battle cry + shockwave + sparks |
 | 1 | `#status` | สถานะ Worker | จำนวนโมเดล, recent activity, worker state |
+| — | (inline) | 🎒 **School Roster** | 4 buckets: นักเรียนใหม่ย้ายมา (≤24h) · โดดเรียน (2-48h) · ลาออก (48h-7d) · โดนไล่ออก (>7d) |
 | 2 | `#providers` | Providers | grid แสดง provider ทั้งหมด พร้อมสถานะ |
 | 3 | `#rankings` | อันดับนักเรียน | top models เรียงตามคะแนน |
 | 4 | `#chat` | Chat Panel | ทดลองคุยกับโมเดลโดยตรง |
@@ -172,6 +174,20 @@ OLLAMA_API_KEY=ollama
 | 10 | `#complaints` | ใบเตือน | issues + failed exams |
 | 11 | `#gateway-logs` | สมุดจดงาน | request/response audit trail |
 | 12 | `#logs` | Logs | worker activity log |
+
+### ⚔️ Battle Theater — how it reacts
+
+ข้อมูลจาก `/api/gateway-logs` (poll ทุก 5s) → แปลงเป็นฉากตามผลจริง:
+
+| เวลาตอบ / สถานะ | Scene | พระเอก 🦸 | ผู้ร้าย 👿 | Effect |
+|---|---|---|---|---|
+| ≤ 1.5s | `epic` | Strike lunge +150px | Recoil -60px | 💥 **CRITICAL! -99!** + shockwave + 12 sparks + speed lines (สีเขียว) |
+| ≤ 4s | `win` | Strike lunge | Recoil | ⚔️ **STRIKE! -40** + shockwave + sparks (สีเขียว) |
+| 4-10s | `thinking` | Idle breathing | Idle breathing | — |
+| > 10s | `slow` | Idle breathing | Idle breathing | — |
+| error/5xx | `fail` | Recoil -60px | Strike lunge -150px | 💢 **IMPACT! -55** + shockwave + sparks (**สีแดง**) |
+
+Assets: [public/hero.svg](public/hero.svg) (นักรบไทย/Neo hybrid, ดาบเรืองแสงเขียว), [public/villain.svg](public/villain.svg) (hooded cyberpunk, ไม้เท้าคริสตัลแดง)
 
 ---
 

@@ -40,6 +40,7 @@ export interface StatusData {
     new: ModelChange[];
     missing: ModelChange[];
     warning: ModelChange[];
+    expelled?: ModelChange[];
   };
 }
 

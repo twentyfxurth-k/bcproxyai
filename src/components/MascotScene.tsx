@@ -2,6 +2,282 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+// Hero vs Villain combat scene
+// sceneToken changes every scene → re-mounts → replays animations
+function BattleScene({ kind, sceneToken }: { kind: SceneKind; sceneToken: string }) {
+  const heroAttacking = kind === "epic" || kind === "win";
+  const villainAttacking = kind === "fail";
+  const showAction = heroAttacking || villainAttacking;
+
+  // Animation class per role
+  const heroAnim = heroAttacking
+    ? "animate-hero-strike"
+    : villainAttacking
+    ? "animate-hero-recoil"
+    : "animate-idle-hero";
+
+  const villainAnim = villainAttacking
+    ? "animate-villain-strike"
+    : heroAttacking
+    ? "animate-villain-recoil"
+    : "animate-idle-villain";
+
+  // Damage number — shows on the LOSER of the exchange
+  const damage =
+    kind === "epic" ? { value: "-99!", color: "#00ff41", side: "villain" as const, cry: "💥 CRITICAL!" }
+    : kind === "win" ? { value: "-40", color: "#84ff6b", side: "villain" as const, cry: "⚔️ STRIKE!" }
+    : kind === "fail" ? { value: "-55", color: "#ff3355", side: "hero" as const, cry: "💢 IMPACT!" }
+    : null;
+
+  const clashColor = villainAttacking ? "rgba(255,0,51,0.95)" : "rgba(0,255,65,0.95)";
+  const clashSecond = villainAttacking ? "rgba(255,120,120,0.5)" : "rgba(180,255,200,0.5)";
+
+  return (
+    <div className="absolute inset-0 pointer-events-none z-[5] overflow-hidden">
+      {/* Speed lines radiating when someone attacks */}
+      {showAction && (
+        <div className="absolute inset-0" key={`speed-${sceneToken}`}>
+          {[...Array(6)].map((_, i) => {
+            const top = 20 + i * 12;
+            const delay = i * 30;
+            return (
+              <div
+                key={i}
+                className="absolute left-0 right-0 h-0.5 animate-speed-line origin-left"
+                style={{
+                  top: `${top}%`,
+                  background: `linear-gradient(90deg, transparent 0%, ${heroAttacking ? "#00ff41" : "#ff0033"} 50%, transparent 100%)`,
+                  animationDelay: `${delay}ms`,
+                  opacity: 0.5,
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {/* Hero — left side */}
+      <div
+        key={`hero-${sceneToken}`}
+        className={`absolute bottom-0 left-4 sm:left-16 h-[92%] ${heroAnim}`}
+        style={{ transformOrigin: "bottom center" }}
+      >
+        <img src="/hero.svg" alt="Hero" className="h-full" />
+      </div>
+
+      {/* Villain — right side (wrapper animates, img is flipped inside) */}
+      <div
+        key={`villain-${sceneToken}`}
+        className={`absolute bottom-0 right-4 sm:right-16 h-[92%] ${villainAnim}`}
+        style={{ transformOrigin: "bottom center" }}
+      >
+        <img src="/villain.svg" alt="Villain" className="h-full" style={{ transform: "scaleX(-1)" }} />
+      </div>
+
+      {/* Clash burst in the center */}
+      {showAction && (
+        <div
+          key={`clash-${sceneToken}`}
+          className="absolute top-1/2 left-1/2 animate-clash"
+          style={{
+            width: 160,
+            height: 160,
+            marginLeft: -80,
+            marginTop: -80,
+            background: `radial-gradient(circle, ${clashColor} 0%, ${clashSecond} 35%, transparent 70%)`,
+            filter: "blur(1px)",
+          }}
+        />
+      )}
+
+      {/* Shockwave ring */}
+      {showAction && (
+        <div
+          key={`ring-${sceneToken}`}
+          className="absolute top-1/2 left-1/2 rounded-full animate-shockwave"
+          style={{
+            width: 100,
+            height: 100,
+            marginLeft: -50,
+            marginTop: -50,
+            border: `4px solid ${clashColor}`,
+            boxShadow: `0 0 20px ${clashColor}, inset 0 0 20px ${clashColor}`,
+          }}
+        />
+      )}
+
+      {/* Radiating sparks */}
+      {showAction && (
+        <div className="absolute top-1/2 left-1/2" key={`sparks-${sceneToken}`}>
+          {[...Array(12)].map((_, i) => {
+            const angle = (i * 30 * Math.PI) / 180;
+            const dist = 100 + (i % 3) * 20;
+            const dx = Math.cos(angle) * dist;
+            const dy = Math.sin(angle) * dist;
+            return (
+              <span
+                key={i}
+                className="absolute w-1.5 h-1.5 rounded-full animate-spark"
+                style={{
+                  background: clashColor,
+                  boxShadow: `0 0 8px ${clashColor}, 0 0 16px ${clashColor}`,
+                  ["--dx" as string]: `${dx}px`,
+                  ["--dy" as string]: `${dy}px`,
+                  animationDelay: `${i * 25}ms`,
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {/* Battle cry — big text in the center */}
+      {damage && (
+        <div
+          key={`cry-${sceneToken}`}
+          className="absolute top-[38%] left-1/2 font-black text-2xl sm:text-4xl animate-battle-cry tracking-wider z-[8]"
+          style={{
+            color: damage.color,
+            textShadow: `0 0 12px ${damage.color}, 0 0 24px ${damage.color}, 2px 2px 0 rgba(0,0,0,0.8)`,
+            fontFamily: "ui-monospace, monospace",
+          }}
+        >
+          {damage.cry}
+        </div>
+      )}
+
+      {/* Damage number — pops on the loser */}
+      {damage && (
+        <div
+          key={`dmg-${sceneToken}`}
+          className="absolute top-1/3 font-black text-3xl sm:text-5xl animate-damage tracking-tight"
+          style={{
+            color: damage.color,
+            textShadow: `0 0 16px ${damage.color}, 0 0 32px ${damage.color}, 3px 3px 0 rgba(0,0,0,0.9)`,
+            left: damage.side === "villain" ? "78%" : "22%",
+            fontFamily: "ui-monospace, monospace",
+            zIndex: 8,
+          }}
+        >
+          {damage.value}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Matrix digital rain — Thai characters falling on canvas
+function MatrixRain({ intensity = 1 }: { intensity?: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const intensityRef = useRef(intensity);
+
+  // Keep ref in sync without restarting the animation loop
+  useEffect(() => {
+    intensityRef.current = intensity;
+  }, [intensity]);
+
+  // Empty deps: mount once, never restart on intensity change
+  // (intensity is read from ref inside the animation loop)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let raf = 0;
+    let lastDraw = 0;
+
+    const resize = () => {
+      const { width, height } = canvas.getBoundingClientRect();
+      canvas.width = Math.floor(width * window.devicePixelRatio);
+      canvas.height = Math.floor(height * window.devicePixelRatio);
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+
+    // Thai consonants + numerals + a few latin/katakana for variety
+    const thai = "กขคงจฉชซญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ๐๑๒๓๔๕๖๗๘๙";
+    const katakana = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉ";
+    const chars = (thai + thai + katakana).split("");
+
+    const fontSize = 14;
+    let cols = 0;
+    let drops: number[] = [];
+
+    const initDrops = () => {
+      const w = canvas.getBoundingClientRect().width;
+      cols = Math.floor(w / fontSize);
+      drops = Array(cols).fill(0).map(() => Math.random() * 30);
+    };
+    initDrops();
+    const ro2 = new ResizeObserver(initDrops);
+    ro2.observe(canvas);
+
+    const draw = (t: number) => {
+      const dt = t - lastDraw;
+      if (dt < 60 / intensityRef.current) {
+        raf = requestAnimationFrame(draw);
+        return;
+      }
+      lastDraw = t;
+
+      const { width, height } = canvas.getBoundingClientRect();
+      // Trail fade
+      ctx.fillStyle = "rgba(0, 8, 0, 0.12)";
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.font = `${fontSize}px ui-monospace, monospace`;
+      ctx.textBaseline = "top";
+
+      for (let i = 0; i < cols; i++) {
+        const ch = chars[Math.floor(Math.random() * chars.length)];
+        const x = i * fontSize;
+        const y = drops[i] * fontSize;
+
+        // Head of column = bright white-green
+        ctx.fillStyle = "rgba(220, 255, 220, 0.95)";
+        ctx.fillText(ch, x, y);
+
+        // Trail behind = dimmer green
+        ctx.fillStyle = "rgba(0, 255, 65, 0.55)";
+        if (drops[i] > 1) {
+          ctx.fillText(
+            chars[Math.floor(Math.random() * chars.length)],
+            x,
+            y - fontSize,
+          );
+        }
+
+        // Reset with random chance once past bottom
+        if (y > height && Math.random() > 0.965) {
+          drops[i] = 0;
+        }
+        drops[i] += 1;
+      }
+
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      ro2.disconnect();
+    };
+  }, [intensity]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      aria-hidden
+    />
+  );
+}
+
 // ───────────────────────────────────────────────────────────────
 // Live Mascot Theater
 // Reads real activity from /api/gateway-logs (สมุดจดงาน)
@@ -31,11 +307,6 @@ interface Scene {
   caption: string;
   bg: string;
 }
-
-const PROVIDER_HEX: Record<string, string> = {
-  openrouter: "#3b82f6", kilo: "#a855f7", google: "#34d399", groq: "#fb923c",
-  cerebras: "#f43e5e", sambanova: "#14b8a6", mistral: "#38bdf8", ollama: "#84cc16",
-};
 
 const SHORT_PROVIDER: Record<string, string> = {
   openrouter: "OpenRouter", groq: "Groq", cerebras: "Cerebras",
@@ -99,80 +370,7 @@ const IDLE_SCENE: Scene = {
 };
 
 // Render the cartoon character set for each scene kind
-function SceneCharacters({ scene }: { scene: Scene }) {
-  const hex = PROVIDER_HEX[scene.provider] ?? "#a855f7";
-
-  switch (scene.kind) {
-    case "epic":
-      return (
-        <div className="flex items-end gap-4 text-6xl">
-          <span className="animate-bob">🦐</span>
-          <span className="text-5xl animate-spin-slow">🚀</span>
-          <span className="animate-bob" style={{ animationDelay: "0.2s" }}>🦞</span>
-          <span className="text-4xl animate-float-up">⚡</span>
-          <span className="text-4xl animate-float-up" style={{ animationDelay: "0.3s" }}>✨</span>
-          <span className="text-4xl animate-float-up" style={{ animationDelay: "0.6s" }}>🎉</span>
-        </div>
-      );
-    case "win":
-      return (
-        <div className="flex items-end gap-4 text-6xl">
-          <span className="animate-bob">🦐</span>
-          <span className="text-5xl animate-wiggle">🏆</span>
-          <span className="animate-bob" style={{ animationDelay: "0.15s" }}>🦞</span>
-          <span className="text-3xl animate-float-up">✨</span>
-        </div>
-      );
-    case "thinking":
-      return (
-        <div className="flex items-end gap-4 text-6xl">
-          <span className="animate-wiggle">🦐</span>
-          <span className="text-5xl animate-bob">🤔</span>
-          <span className="text-4xl animate-float-up">💭</span>
-          <span className="animate-wiggle" style={{ animationDelay: "0.2s" }}>🦞</span>
-        </div>
-      );
-    case "slow":
-      return (
-        <div className="flex items-end gap-4 text-6xl">
-          <span className="animate-bob">🦐</span>
-          <span className="text-5xl animate-bob" style={{ animationDelay: "0.4s" }}>😴</span>
-          <span className="text-4xl animate-float-up">💤</span>
-          <span className="animate-bob" style={{ animationDelay: "0.8s" }}>🦞</span>
-        </div>
-      );
-    case "fail":
-      return (
-        <div className="flex items-end gap-4 text-6xl">
-          <span className="animate-shake">🦐</span>
-          <span className="text-5xl animate-shake">❌</span>
-          <span className="text-5xl animate-shake">😭</span>
-          <span className="text-4xl animate-float-up">💧</span>
-          <span className="text-4xl animate-float-up" style={{ animationDelay: "0.3s" }}>💧</span>
-        </div>
-      );
-    case "study":
-      return (
-        <div className="flex items-end gap-4 text-6xl">
-          <span className="animate-wiggle">🦐</span>
-          <span className="text-5xl animate-bob">📚</span>
-          <span className="text-4xl animate-float-up">💡</span>
-          <span className="animate-bob" style={{ animationDelay: "0.2s" }}>🦞</span>
-        </div>
-      );
-    case "idle":
-    default:
-      return (
-        <div className="flex items-end gap-6 text-6xl">
-          <span className="animate-bob">🦐</span>
-          <span className="text-5xl animate-bob" style={{ animationDelay: "0.3s" }}>📖</span>
-          <span className="animate-bob" style={{ animationDelay: "0.6s" }}>🦞</span>
-        </div>
-      );
-  }
-  // Provider color hint (used by ring around badge later if we need it)
-  void hex;
-}
+// SceneCharacters removed — Hero vs Villain SVG fighters replaced the emoji cast
 
 // Stat badge with count-up
 function useCountUp(target: number, duration = 800): number {
@@ -312,106 +510,153 @@ export function MascotScene() {
   const animSuccess = useCountUp(stats.success);
   const animFail = useCountUp(stats.fail);
 
+  // Matrix rain intensity reacts to scene mood
+  const intensity =
+    scene.kind === "epic" || scene.kind === "win" ? 1.6
+    : scene.kind === "fail" ? 1.8
+    : scene.kind === "thinking" || scene.kind === "slow" ? 0.6
+    : 1;
+
   return (
-    <div className="space-y-3">
-      {/* Stage */}
+    <div className="space-y-3 font-mono">
+      {/* Stage — Thai Matrix style */}
       <div
-        className={`relative h-44 sm:h-52 rounded-2xl overflow-hidden glass border border-white/10 bg-gradient-to-br ${scene.bg} cursor-pointer select-none transition-colors duration-700`}
+        className="relative h-60 sm:h-72 rounded-2xl overflow-hidden cursor-pointer select-none border border-emerald-500/40 bg-black"
         onClick={() => setSceneIdx(i => (i + 1) % Math.max(scenes.length, 1))}
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
-        title="คลิกเพื่อเปลี่ยนฉาก · hover เพื่อหยุด"
+        title="[ คลิกเพื่อข้ามฉาก · hover เพื่อหยุด ]"
+        style={{
+          boxShadow: "0 0 24px rgba(0, 255, 65, 0.15), inset 0 0 60px rgba(0, 255, 65, 0.08)",
+        }}
       >
-        {/* Live indicator */}
-        <div className="absolute top-3 left-4 flex items-center gap-2 text-[10px] text-gray-300 z-10">
+        {/* Matrix digital rain background */}
+        <MatrixRain intensity={intensity} />
+
+        {/* Hero vs Villain battle layer */}
+        <BattleScene kind={scene.kind} sceneToken={`${sceneIdx}-${scene.kind}-${scene.provider}`} />
+
+        {/* CRT scanlines overlay */}
+        <div
+          className="absolute inset-0 pointer-events-none mix-blend-overlay opacity-40"
+          style={{
+            backgroundImage:
+              "repeating-linear-gradient(0deg, rgba(0,255,65,0.06) 0px, rgba(0,255,65,0.06) 1px, transparent 1px, transparent 3px)",
+          }}
+        />
+
+        {/* Vignette */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.7) 100%)",
+          }}
+        />
+
+        {/* Live indicator (top-left) */}
+        <div className="absolute top-3 left-4 flex items-center gap-2 text-[10px] z-10 text-emerald-400">
           <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-500" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
           </span>
-          <span className="font-bold uppercase tracking-wider">LIVE · จากสมุดจดงาน</span>
+          <span className="font-bold uppercase tracking-[0.2em] animate-glitch">
+            [ LIVE_FEED // สมุดจดงาน ]
+          </span>
         </div>
 
-        {/* Background sparkles */}
-        <div className="absolute inset-0 pointer-events-none">
-          <span className="absolute top-3 right-32 text-xs animate-float-up">✨</span>
-          <span className="absolute top-6 right-12 text-xs animate-float-up" style={{ animationDelay: "0.8s" }}>⭐</span>
-          <span className="absolute bottom-10 left-12 text-xs animate-float-up" style={{ animationDelay: "1.4s" }}>💫</span>
-          <span className="absolute bottom-6 right-10 text-xs animate-float-up" style={{ animationDelay: "0.4s" }}>✨</span>
+        {/* Top-right status line */}
+        <div className="absolute top-3 right-4 text-[9px] z-10 text-emerald-500/80 tracking-wider">
+          NODE://{scene.provider || "—"} · {scene.kind.toUpperCase()}
         </div>
 
-        {/* Confetti layer for win/epic */}
+        {/* Confetti layer for win/epic — recolored green */}
         <Confetti active={scene.kind === "win" || scene.kind === "epic"} />
         {/* Rain layer for fail */}
         <TearRain active={scene.kind === "fail"} />
 
-        {/* Main scene content (re-mounted on idx change → triggers animate-scene-in) */}
+        {/* Caption bar — bottom overlay, does not obscure fighters */}
         <div
           key={sceneIdx + scene.kind + scene.caption}
-          className="absolute inset-0 flex flex-col items-center justify-center gap-3 animate-scene-in px-4"
+          className="absolute bottom-6 left-0 right-0 flex flex-col items-center justify-center gap-1 animate-scene-in px-4 z-20"
         >
-          <SceneCharacters scene={scene} />
-          <div className="text-sm sm:text-base text-white font-bold text-center drop-shadow-lg max-w-[90%]">
-            {scene.caption}
+          <div
+            className="text-sm sm:text-base text-emerald-300 font-bold font-mono text-center max-w-[90%] tracking-wide animate-glitch bg-black/60 px-3 py-1 rounded border border-emerald-500/30 backdrop-blur-sm"
+            style={{
+              textShadow:
+                "0 0 8px rgba(0,255,65,0.8), 0 0 16px rgba(0,255,65,0.4)",
+            }}
+          >
+            &gt; {scene.caption}
           </div>
           {scene.model && scene.model !== "?" && (
-            <div className="text-[10px] text-gray-300/80 font-mono">
-              model: {scene.model}
+            <div className="text-[10px] text-emerald-500/70 font-mono tracking-wider">
+              [ model: {scene.model} ]
             </div>
           )}
         </div>
 
-        {/* Progress dots */}
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+        {/* Progress dots — green */}
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 z-10">
           {scenes.map((_, i) => (
             <span
               key={i}
               className={`h-1 rounded-full transition-all ${
-                i === sceneIdx ? "w-5 bg-white/80" : "w-1 bg-white/20"
+                i === sceneIdx
+                  ? "w-5 bg-emerald-400 shadow-[0_0_6px_rgba(0,255,65,0.8)]"
+                  : "w-1 bg-emerald-900/60"
               }`}
             />
           ))}
         </div>
       </div>
 
-      {/* Live stats strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-        <StatCard label="ส่งการบ้านรวม" value={animTotal} icon="📚" hex="#6366f1" />
-        <StatCard label="ผ่าน" value={animSuccess} icon="🏆" hex="#34d399" />
-        <StatCard label="ตก" value={animFail} icon="😭" hex="#f43e5e" />
+      {/* Live stats strip — terminal style */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+        <StatCard label="HOMEWORK_TOTAL" value={animTotal} icon="▣" />
+        <StatCard label="PASS" value={animSuccess} icon="✓" />
+        <StatCard label="FAIL" value={animFail} icon="✗" />
         <StatCard
-          label="เร็วเฉลี่ย"
+          label="AVG_LATENCY"
           value={(stats.avgLatency / 1000).toFixed(1)}
           suffix="s"
           icon="⚡"
-          hex="#fb923c"
         />
       </div>
     </div>
   );
 }
 
+// Terminal-style stat card — green phosphor on black
 function StatCard({
   label,
   value,
   suffix,
   icon,
-  hex,
 }: {
   label: string;
   value: number | string;
   suffix?: string;
   icon: string;
-  hex: string;
 }) {
   return (
     <div
-      className="glass rounded-xl px-3 py-2 flex items-center gap-2 border border-white/5 hover:border-white/20 transition-colors"
-      style={{ borderLeftColor: hex, borderLeftWidth: 3 }}
+      className="rounded-lg px-3 py-2 flex items-center gap-2 bg-black border border-emerald-500/40 hover:border-emerald-400 transition-all"
+      style={{
+        boxShadow: "0 0 8px rgba(0,255,65,0.15), inset 0 0 12px rgba(0,255,65,0.06)",
+      }}
     >
-      <span className="text-lg">{icon}</span>
+      <span className="text-base text-emerald-400" style={{ textShadow: "0 0 6px rgba(0,255,65,0.8)" }}>
+        {icon}
+      </span>
       <div className="flex flex-col leading-tight min-w-0">
-        <span className="text-[10px] text-gray-500 truncate">{label}</span>
-        <span className="text-sm font-bold text-white tabular-nums">
+        <span className="text-[9px] text-emerald-500/70 truncate tracking-wider uppercase">
+          {label}
+        </span>
+        <span
+          className="text-sm font-bold tabular-nums text-emerald-300"
+          style={{ textShadow: "0 0 6px rgba(0,255,65,0.7)" }}
+        >
           {value}
           {suffix}
         </span>

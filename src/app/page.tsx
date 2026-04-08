@@ -655,7 +655,7 @@ export default function Dashboard() {
 
         {/* ── Model Changes Alert — แบบโรงเรียน ────────────────────────── */}
         {statusData?.modelChanges && (
-          (statusData.modelChanges.new.length > 0 || statusData.modelChanges.missing.length > 0 || statusData.modelChanges.warning.length > 0) && (
+          (statusData.modelChanges.new.length > 0 || statusData.modelChanges.missing.length > 0 || statusData.modelChanges.warning.length > 0 || (statusData.modelChanges.expelled?.length ?? 0) > 0) && (
             <section className="animate-fade-in-up space-y-3">
               {/* นักเรียนใหม่ย้ายมา */}
               {statusData.modelChanges.new.length > 0 && (
@@ -695,13 +695,13 @@ export default function Dashboard() {
                   </div>
                 </div>
               )}
-              {/* ลาออกจากโรงเรียน */}
+              {/* ลาออกจากโรงเรียน (2-7 วัน) */}
               {statusData.modelChanges.missing.length > 0 && (
                 <div className="glass rounded-2xl p-4 border border-red-500/30 bg-red-500/5">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-lg">🪦</span>
                     <span className="font-bold text-red-400">ลาออกจากโรงเรียน ({statusData.modelChanges.missing.length})</span>
-                    <span className="text-xs text-gray-500">หายไปเกิน 48 ชม. — ไปดีแล้ว</span>
+                    <span className="text-xs text-gray-500">หายไป 2-7 วัน — ยังมีหวังกลับมา</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {statusData.modelChanges.missing.map((m) => (
@@ -714,6 +714,48 @@ export default function Dashboard() {
                   </div>
                 </div>
               )}
+              {/* โดนไล่ออก (>7 วัน) — แสดงเสมอแม้ว่าง เพื่อให้รู้ว่ามี bucket นี้ */}
+              <div className="glass rounded-2xl p-4 border border-rose-700/40 bg-gradient-to-br from-rose-950/40 to-black/60">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-lg animate-shake">⛔</span>
+                  <span className="font-bold text-rose-500">
+                    โดนไล่ออก! ({statusData.modelChanges.expelled?.length ?? 0})
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    หายเกิน 7 วัน — ต้องสมัครเรียนใหม่ถึงจะกลับมาได้
+                  </span>
+                </div>
+                {(statusData.modelChanges.expelled?.length ?? 0) === 0 ? (
+                  <div className="text-xs text-gray-600 italic px-1">
+                    🎉 ยังไม่มีนักเรียนโดนไล่ออก — ทุกคนยังมาเรียนสม่ำเสมอ
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {statusData.modelChanges.expelled?.map((m) => {
+                      const lastSeen = m.lastSeen ? new Date(m.lastSeen) : null;
+                      const daysAgo = lastSeen
+                        ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60 * 60 * 24))
+                        : null;
+                      return (
+                        <span
+                          key={m.id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-950/50 border border-rose-700/40 text-sm text-rose-400 line-through opacity-50 hover:opacity-90 transition-all grayscale hover:grayscale-0 cursor-default"
+                          title={`หายไป ${daysAgo ?? "?"} วัน`}
+                        >
+                          <span className="text-xs">🚷</span>
+                          {m.name}
+                          <span className="text-xs text-rose-600/70">({m.provider})</span>
+                          {daysAgo !== null && (
+                            <span className="text-[10px] text-rose-700/80 font-mono">
+                              -{daysAgo}d
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </section>
           )
         )}

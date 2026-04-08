@@ -88,10 +88,20 @@ export async function GET() {
       ORDER BY first_seen DESC
     `).all();
 
-    // โมเดลหายไป (last_seen เกิน 48 ชม.)
+    // โมเดลลาออก (last_seen 48h - 7 วัน) — ยังมีหวังกลับมา
     const missingModels = db.prepare(`
       SELECT id, name, provider, model_id, context_length, tier, last_seen as lastSeen
-      FROM models WHERE last_seen < datetime('now', '-48 hours')
+      FROM models
+      WHERE last_seen < datetime('now', '-48 hours')
+        AND last_seen >= datetime('now', '-7 days')
+      ORDER BY last_seen DESC
+    `).all();
+
+    // โมเดลโดนไล่ออก (last_seen เกิน 7 วัน) — หายนาน ต้องสมัครเรียนใหม่
+    const expelledModels = db.prepare(`
+      SELECT id, name, provider, model_id, context_length, tier, last_seen as lastSeen
+      FROM models
+      WHERE last_seen < datetime('now', '-7 days')
       ORDER BY last_seen DESC
     `).all();
 
@@ -123,6 +133,7 @@ export async function GET() {
         new: newModels,
         missing: missingModels,
         warning: warningModels,
+        expelled: expelledModels,
       },
       recentLogs,
     };
