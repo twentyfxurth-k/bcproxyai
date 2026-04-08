@@ -448,24 +448,119 @@ function TearRain({ active }: { active: boolean }) {
   );
 }
 
+interface BattleScore {
+  hero: number;
+  villain: number;
+  heroWins: number;
+  villainWins: number;
+  total: number;
+  winRate: number;
+}
+
+// Cumulative scoreboard — running totals from Redis, persisted across restarts
+function BattleScoreboard({ score }: { score: BattleScore }) {
+  const heroPct = score.hero + score.villain > 0
+    ? Math.round((score.hero / (score.hero + score.villain)) * 100)
+    : 50;
+  const heroLeading = score.hero >= score.villain;
+
+  return (
+    <div
+      className="rounded-xl border border-emerald-500/30 bg-black px-4 py-2.5 font-mono text-xs sm:text-sm"
+      style={{
+        boxShadow: "0 0 16px rgba(0, 255, 65, 0.1), inset 0 0 24px rgba(0, 0, 0, 0.6)",
+      }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        {/* Hero side */}
+        <div className="flex items-center gap-2 flex-1">
+          <span className="text-2xl">🦸</span>
+          <div className="flex flex-col leading-tight">
+            <span className="text-[9px] uppercase tracking-wider text-emerald-500/70">HERO</span>
+            <span
+              className="text-2xl sm:text-3xl font-black tabular-nums text-emerald-300"
+              style={{ textShadow: "0 0 8px rgba(0,255,65,0.7)" }}
+            >
+              {score.hero.toLocaleString()}
+            </span>
+            <span className="text-[10px] text-emerald-500/60">{score.heroWins} wins</span>
+          </div>
+        </div>
+
+        {/* Center — VS + win rate */}
+        <div className="flex flex-col items-center gap-1 px-2">
+          <span className="text-[10px] uppercase tracking-[0.3em] text-amber-400/80">VS</span>
+          <span
+            className={`text-lg font-black ${heroLeading ? "text-emerald-300" : "text-rose-400"}`}
+            style={{
+              textShadow: heroLeading
+                ? "0 0 8px rgba(0,255,65,0.7)"
+                : "0 0 8px rgba(255,0,51,0.7)",
+            }}
+          >
+            {heroPct}%
+          </span>
+          <span className="text-[9px] text-gray-500">{score.total} battles</span>
+        </div>
+
+        {/* Villain side */}
+        <div className="flex items-center gap-2 flex-1 justify-end">
+          <div className="flex flex-col leading-tight items-end">
+            <span className="text-[9px] uppercase tracking-wider text-rose-500/70">VILLAIN</span>
+            <span
+              className="text-2xl sm:text-3xl font-black tabular-nums text-rose-400"
+              style={{ textShadow: "0 0 8px rgba(255,0,51,0.7)" }}
+            >
+              {score.villain.toLocaleString()}
+            </span>
+            <span className="text-[10px] text-rose-500/60">{score.villainWins} wins</span>
+          </div>
+          <span className="text-2xl">👿</span>
+        </div>
+      </div>
+
+      {/* Win-rate bar */}
+      <div className="mt-2 h-1.5 w-full bg-black rounded-full overflow-hidden border border-white/5">
+        <div
+          className="h-full bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500 transition-all duration-700"
+          style={{
+            width: `${heroPct}%`,
+            boxShadow: "0 0 8px rgba(0,255,65,0.6)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function MascotScene() {
   const [logs, setLogs] = useState<GatewayLog[]>([]);
+  const [score, setScore] = useState<BattleScore | null>(null);
   const [sceneIdx, setSceneIdx] = useState(0);
   const [paused, setPaused] = useState(false);
 
-  // Poll real logs every 5 seconds
+  // Poll real logs + battle score every 5 seconds
   useEffect(() => {
     let alive = true;
-    const fetchLogs = async () => {
+    const fetchAll = async () => {
       try {
-        const res = await fetch("/api/gateway-logs?limit=12");
-        if (!res.ok || !alive) return;
-        const data = await res.json();
-        if (alive && Array.isArray(data.logs)) setLogs(data.logs);
+        const [logsRes, infraRes] = await Promise.all([
+          fetch("/api/gateway-logs?limit=12"),
+          fetch("/api/infra"),
+        ]);
+        if (!alive) return;
+        if (logsRes.ok) {
+          const data = await logsRes.json();
+          if (alive && Array.isArray(data.logs)) setLogs(data.logs);
+        }
+        if (infraRes.ok) {
+          const infra = await infraRes.json();
+          if (alive && infra.battle) setScore(infra.battle as BattleScore);
+        }
       } catch { /* silent */ }
     };
-    fetchLogs();
-    const t = window.setInterval(fetchLogs, 5000);
+    fetchAll();
+    const t = window.setInterval(fetchAll, 5000);
     return () => { alive = false; window.clearInterval(t); };
   }, []);
 
@@ -519,6 +614,9 @@ export function MascotScene() {
 
   return (
     <div className="space-y-3 font-mono">
+      {/* Cumulative battle scoreboard */}
+      {score && score.total > 0 && <BattleScoreboard score={score} />}
+
       {/* Stage — Thai Matrix style */}
       <div
         className="relative h-60 sm:h-72 rounded-2xl overflow-hidden cursor-pointer select-none border border-emerald-500/40 bg-black"

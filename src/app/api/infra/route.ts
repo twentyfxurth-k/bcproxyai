@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSqlClient } from "@/lib/db/client";
 import { getRedis } from "@/lib/redis";
 import { getActiveReplicas } from "@/lib/heartbeat";
+import { getBattleScore } from "@/lib/battle-score";
 
 export const dynamic = "force-dynamic";
 
@@ -292,6 +293,7 @@ export async function GET() {
       latest: k6Latest,
     },
     serverTime: new Date().toISOString(),
+    battle: await getBattleScore(),
   };
 
   _memo = { data: result, ts: Date.now() };

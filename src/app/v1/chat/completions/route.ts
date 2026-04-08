@@ -11,6 +11,7 @@ import { detectPromptCategory, recordRoutingResult, getBestModelsForCategory, ge
 import { getRedis } from "@/lib/redis";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { getCachedResponse, setCachedResponse } from "@/lib/response-cache";
+import { recordBattleEvent, outcomeFromLatency } from "@/lib/battle-score";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -1095,6 +1096,7 @@ export async function POST(req: NextRequest) {
               usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0, null, userMsg, content?.slice(0, 500) ?? null);
             await recordRoutingResult(winner.id, winner.provider, promptCategory, true, latency);
             await trackTokenUsage(winner.provider, winner.model_id, usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0);
+            recordBattleEvent(outcomeFromLatency(latency, true)).catch(() => { /* cosmetic */ });
             if (content) {
               setCachedResponse(body, { content, provider: winner.provider, model: winner.model_id }).catch(() => { /* non-critical */ });
             }
@@ -1224,6 +1226,7 @@ export async function POST(req: NextRequest) {
               if (content) {
                 setCachedResponse(body, { content, provider, model: actualModelId }).catch(() => { /* non-critical */ });
               }
+              recordBattleEvent(outcomeFromLatency(latency, true)).catch(() => { /* cosmetic */ });
               console.log(`[RES] 200 | ${provider}/${actualModelId} | ${latency}ms | "${_reqMsg}"`);
               return new Response(JSON.stringify(json), { status: 200, headers });
             } catch {
@@ -1232,9 +1235,11 @@ export async function POST(req: NextRequest) {
           }
 
           const proxied = await buildProxiedResponse(response, provider, actualModelId, isStream, estInputTokens);
-          await recordRoutingResult(dbModelId, provider, promptCategory, true, Date.now() - startTime);
-          await logGateway(modelField, actualModelId, provider, 200, Date.now() - startTime, 0, 0, null, userMsg, "[stream]");
-          console.log(`[RES] 200 | ${provider}/${actualModelId} | ${Date.now() - startTime}ms | "${_reqMsg}"`);
+          const streamLatency = Date.now() - startTime;
+          await recordRoutingResult(dbModelId, provider, promptCategory, true, streamLatency);
+          await logGateway(modelField, actualModelId, provider, 200, streamLatency, 0, 0, null, userMsg, "[stream]");
+          recordBattleEvent(outcomeFromLatency(streamLatency, true)).catch(() => { /* cosmetic */ });
+          console.log(`[RES] 200 | ${provider}/${actualModelId} | ${streamLatency}ms | "${_reqMsg}"`);
           return proxied;
         }
 
@@ -1283,6 +1288,7 @@ export async function POST(req: NextRequest) {
 
     const latency = Date.now() - startTime;
     await logGateway(modelField, null, null, 503, latency, 0, 0, lastError.slice(0, 300), userMsg, null);
+    recordBattleEvent("fail").catch(() => { /* cosmetic */ });
     console.log(`[RES] 503 | ${triedProviders.size} providers tried, ${blockedProviders.size} blocked | ${latency}ms | ${lastError.slice(0, 120)}`);
     return openAIError(503, {
       message: `All ${Math.min(MAX_RETRIES, spreadCandidates.length)} models from ${triedProviders.size} providers failed: ${lastError}`,
