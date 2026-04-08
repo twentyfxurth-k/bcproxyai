@@ -21,13 +21,13 @@ export async function GET() {
     const lastRun = workerMap.get("last_run") ?? null;
     const nextRun = workerMap.get("next_run") ?? null;
 
-    // Total models
-    const totalRows = await sql<{ count: number }[]>`SELECT COUNT(*) as count FROM models`;
-    const totalCount = totalRows[0]?.count ?? 0;
+    // Total models — cast to int so the postgres driver returns a real JS number
+    const totalRows = await sql<{ count: number }[]>`SELECT COUNT(*)::int as count FROM models`;
+    const totalCount = Number(totalRows[0]?.count ?? 0);
 
     // Available = total - cooldown
     const availableRows = await sql<{ count: number }[]>`
-      SELECT COUNT(*) as count FROM models
+      SELECT COUNT(*)::int as count FROM models
       WHERE id NOT IN (
         SELECT h.model_id FROM health_logs h
         INNER JOIN (SELECT model_id, MAX(id) as max_id FROM health_logs GROUP BY model_id) l
@@ -35,23 +35,23 @@ export async function GET() {
         WHERE h.cooldown_until > now()
       )
     `;
-    const availableCount = availableRows[0]?.count ?? 0;
+    const availableCount = Number(availableRows[0]?.count ?? 0);
 
     // Cooldown models
     const cooldownRows = await sql<{ count: number }[]>`
-      SELECT COUNT(DISTINCT h.model_id) as count
+      SELECT COUNT(DISTINCT h.model_id)::int as count
       FROM health_logs h
       INNER JOIN (SELECT model_id, MAX(id) as max_id FROM health_logs GROUP BY model_id) l
         ON h.model_id = l.model_id AND h.id = l.max_id
       WHERE h.cooldown_until > now()
     `;
-    const cooldownCount = cooldownRows[0]?.count ?? 0;
+    const cooldownCount = Number(cooldownRows[0]?.count ?? 0);
 
     // Benchmarked models
     const benchmarkedRows = await sql<{ count: number }[]>`
-      SELECT COUNT(DISTINCT model_id) as count FROM benchmark_results
+      SELECT COUNT(DISTINCT model_id)::int as count FROM benchmark_results
     `;
-    const benchmarkedCount = benchmarkedRows[0]?.count ?? 0;
+    const benchmarkedCount = Number(benchmarkedRows[0]?.count ?? 0);
 
     // Average score
     const avgRows = await sql<{ avg_score: number | null }[]>`

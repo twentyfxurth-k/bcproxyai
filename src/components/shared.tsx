@@ -195,15 +195,22 @@ export function CircleProgress({ pct, color, size = 56 }: { pct: number; color: 
 
 // ─── Animated Counter ──────────────────────────────────────────────────────────
 
-export function AnimatedNumber({ value, duration = 800 }: { value: number; duration?: number }) {
+export function AnimatedNumber({ value, duration = 800 }: { value: number | string; duration?: number }) {
   const [display, setDisplay] = useState(0);
   const start = useRef(0);
   const raf = useRef<number | null>(null);
 
   useEffect(() => {
     if (raf.current) cancelAnimationFrame(raf.current);
-    const from = start.current;
-    const to = value;
+    // Coerce — Postgres numeric columns come back as strings through some drivers,
+    // and string concat inside the easing formula produces NaN or huge bogus values.
+    const to = Number(value);
+    if (!Number.isFinite(to)) {
+      setDisplay(0);
+      start.current = 0;
+      return;
+    }
+    const from = Number(start.current) || 0;
     const startTime = performance.now();
     function step(now: number) {
       const t = Math.min((now - startTime) / duration, 1);
