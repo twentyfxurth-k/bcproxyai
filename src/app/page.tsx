@@ -43,6 +43,7 @@ import { ComplaintPanel } from "../components/ComplaintPanel";
 import { RoutingLearnPanel } from "../components/RoutingLearnPanel";
 import { TrendPanel } from "../components/TrendPanel";
 import { MascotScene } from "../components/MascotScene";
+import { InfraPanel } from "../components/InfraPanel";
 import { UptimePanel } from "../components/UptimePanel";
 import { CostOptimizerPanel } from "../components/CostOptimizerPanel";
 import { SchoolBellPanel } from "../components/SchoolBellPanel";
@@ -415,6 +416,7 @@ export default function Dashboard() {
           {/* Row 2: Nav links — wrappable */}
           <div className="flex flex-wrap gap-1 pb-2">
             {[
+              { id: "infra",         icon: "\u{1F3D7}", label: "โครงสร้าง" },
               { id: "status",        icon: "\u{1F3EB}", label: "ครูใหญ่" },
               { id: "providers",     icon: "\u{1F50C}", label: "ผู้ให้บริการ" },
               { id: "rankings",      icon: "\u{1F3C6}", label: "ผลงาน" },
@@ -448,6 +450,20 @@ export default function Dashboard() {
 
         {/* ── Live Mascot Theater (data-driven from gateway logs) ───────── */}
         <MascotScene />
+
+        {/* ── Infrastructure Monitoring ────────────────────────────────── */}
+        <section id="infra" className="animate-fade-in-up stagger-0">
+          <div className="flex items-center gap-3 mb-4">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/20 text-indigo-400">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </span>
+            <span className="font-bold text-white text-2xl">โครงสร้างระบบ</span>
+            <span className="text-xs text-gray-400 ml-1">Postgres · Redis · Replicas · Rate Limit</span>
+          </div>
+          <InfraPanel />
+        </section>
 
         {/* ── Section 1: Header + Worker Status ──────────────────────────── */}
         <section id="status" className="animate-fade-in-up">
