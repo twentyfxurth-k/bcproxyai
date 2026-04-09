@@ -1,6 +1,7 @@
 import { getSqlClient } from "@/lib/db/schema";
-import { getNextApiKey } from "@/lib/api-keys";
+import { getNextApiKey, getAvailableProviders } from "@/lib/api-keys";
 import { emitEvent } from "@/lib/routing-learn";
+import { isProviderEnabled } from "@/lib/provider-toggle";
 
 interface ModelRow {
   id: string;
@@ -27,9 +28,9 @@ interface ModelRow {
 // ─── Vision & Tools detection from model name / metadata ─────────────────────
 
 const VISION_PATTERNS = [
-  /vision/i, /llava/i, /gemini/i, /gemma[34]/i, /gemma.*it/i, /pixtral/i,
+  /vision/i, /llava/i, /gemini/i, /gemma[34]/i, /pixtral/i,
   /gpt-4o/i, /gpt-4-turbo/i, /claude/i, /qwen.*vl/i, /qwen2\.5-vl/i,
-  /qwen3/i, /internvl/i, /minicpm.*v/i, /cogvlm/i, /phi-3.*vision/i,
+  /qwen3.*vl/i, /internvl/i, /minicpm.*v/i, /cogvlm/i, /phi-3.*vision/i,
   /deepseek-vl/i, /llama-3\.2.*vision/i, /llama-4/i,
   /molmo/i, /moondream/i, /bakllava/i,
 ];
@@ -117,9 +118,11 @@ async function logWorker(step: string, message: string, level = "info") {
 }
 
 async function fetchOpenRouterModels(): Promise<ModelRow[]> {
+  const key = getNextApiKey("openrouter");
+  if (!key) return [];
   try {
     const res = await fetch("https://openrouter.ai/api/v1/models", {
-      headers: { Authorization: `Bearer ${getNextApiKey("openrouter")}` },
+      headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -149,12 +152,11 @@ async function fetchOpenRouterModels(): Promise<ModelRow[]> {
 }
 
 async function fetchKiloModels(): Promise<ModelRow[]> {
+  const kiloKey = getNextApiKey("kilo");
+  if (!kiloKey) return [];
   try {
-    const headers: Record<string, string> = {};
-    const kiloKey = getNextApiKey("kilo");
-    if (kiloKey) headers["Authorization"] = `Bearer ${kiloKey}`;
     const res = await fetch("https://api.kilo.ai/api/gateway/models", {
-      headers,
+      headers: { Authorization: `Bearer ${kiloKey}` },
       signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -184,8 +186,10 @@ async function fetchKiloModels(): Promise<ModelRow[]> {
 }
 
 async function fetchGoogleModels(): Promise<ModelRow[]> {
+  const key = getNextApiKey("google");
+  if (!key) return [];
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${getNextApiKey("google")}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
@@ -217,9 +221,11 @@ async function fetchGoogleModels(): Promise<ModelRow[]> {
 }
 
 async function fetchGroqModels(): Promise<ModelRow[]> {
+  const key = getNextApiKey("groq");
+  if (!key) return [];
   try {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
-      headers: { Authorization: `Bearer ${getNextApiKey("groq")}` },
+      headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -260,10 +266,24 @@ async function fetchCerebrasModels(): Promise<ModelRow[]> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const models: ModelRow[] = [];
+    // Cerebras API ไม่คืน context_length — ใช้ค่าที่ publish บน docs
+    const CEREBRAS_CONTEXT: Record<string, number> = {
+      "llama3.1-8b":                    8_192,
+      "llama-3.3-70b":                  65_536,
+      "llama-4-scout-17b-16e-instruct": 131_072,
+      "llama-4-maverick-17b-128e-instruct": 32_768,
+      "qwen-3-235b-a22b-instruct-2507": 131_072,
+      "qwen-3-coder-480b":              131_072,
+      "qwen-3-32b":                     32_768,
+      "gpt-oss-120b":                   131_072,
+      "zai-glm-4.7":                    131_072,
+      "deepseek-r1-distill-llama-70b":  32_768,
+    };
     for (const m of json.data ?? []) {
       const mid: string = m.id ?? "";
       if (NON_CHAT_KEYWORDS.some((kw) => mid.toLowerCase().includes(kw))) continue;
-      const ctx = m.context_window ?? m.context_length ?? m.max_context_length ?? 0;
+      const apiCtx = m.context_window ?? m.context_length ?? m.max_context_length ?? 0;
+      const ctx = apiCtx > 0 ? apiCtx : (CEREBRAS_CONTEXT[mid] ?? 32_768);
       models.push({
         id: `cerebras:${mid}`,
         name: m.id,
@@ -598,20 +618,43 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
   await logWorker("scan", "Starting model scan");
   const sql = getSqlClient();
 
+  // ลบ model ของ provider ที่ไม่มี API key ออกจากระบบ (ใช้ไม่ได้)
+  try {
+    const availableProviders = getAvailableProviders();
+    const deleted = await sql<{ id: string; provider: string }[]>`
+      DELETE FROM models
+      WHERE provider NOT IN ${sql(availableProviders)}
+      RETURNING id, provider
+    `;
+    if (deleted.length > 0) {
+      const byProvider: Record<string, number> = {};
+      for (const r of deleted) byProvider[r.provider] = (byProvider[r.provider] ?? 0) + 1;
+      await logWorker("scan", `🗑️ ลบ ${deleted.length} model จาก provider ที่ไม่มี key: ${JSON.stringify(byProvider)}`, "warn");
+    }
+  } catch (err) {
+    await logWorker("scan", `ลบ model ไม่มี-key ล้มเหลว: ${err}`, "error");
+  }
+
+  // Helper: ข้าม provider ที่ปิดเอง
+  const guard = async <T>(name: string, fn: () => Promise<T[]>): Promise<T[]> => {
+    if (!(await isProviderEnabled(name))) return [];
+    return fn();
+  };
+
   const [orModels, kiloModels, googleModels, groqModels, cerebrasModels, sambaNovaModels, mistralModels, ollamaModels, githubModels, fireworksModels, cohereModels, cloudflareModels, hfModels] = await Promise.all([
-    fetchOpenRouterModels(),
-    fetchKiloModels(),
-    fetchGoogleModels(),
-    fetchGroqModels(),
-    fetchCerebrasModels(),
-    fetchSambaNovaModels(),
-    fetchMistralModels(),
-    fetchOllamaModels(),
-    fetchGitHubModels(),
-    fetchFireworksModels(),
-    fetchCohereModels(),
-    fetchCloudflareModels(),
-    fetchHuggingFaceModels(),
+    guard("openrouter", fetchOpenRouterModels),
+    guard("kilo", fetchKiloModels),
+    guard("google", fetchGoogleModels),
+    guard("groq", fetchGroqModels),
+    guard("cerebras", fetchCerebrasModels),
+    guard("sambanova", fetchSambaNovaModels),
+    guard("mistral", fetchMistralModels),
+    guard("ollama", fetchOllamaModels),
+    guard("github", fetchGitHubModels),
+    guard("fireworks", fetchFireworksModels),
+    guard("cohere", fetchCohereModels),
+    guard("cloudflare", fetchCloudflareModels),
+    guard("huggingface", fetchHuggingFaceModels),
   ]);
 
   const allModels = [...orModels, ...kiloModels, ...googleModels, ...groqModels, ...cerebrasModels, ...sambaNovaModels, ...mistralModels, ...ollamaModels, ...githubModels, ...fireworksModels, ...cohereModels, ...cloudflareModels, ...hfModels];

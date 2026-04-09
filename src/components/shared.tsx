@@ -8,12 +8,15 @@ export interface WorkerStatus {
   status: "idle" | "running" | "error";
   lastRun: string | null;
   nextRun: string | null;
+  judgeModel?: string | null;
 }
 
 export interface Stats {
   totalModels: number;
   availableModels: number;
   cooldownModels: number;
+  benchmarkedModels: number;
+  avgScore: number;
 }
 
 export interface WorkerLog {
@@ -30,6 +33,7 @@ export interface ModelChange {
   tier: string;
   firstSeen?: string;
   lastSeen?: string;
+  checked?: boolean;
 }
 
 export interface StatusData {
@@ -62,6 +66,12 @@ export interface ModelData {
   supportsVision: boolean;
   supportsTools: boolean;
   health: HealthInfo;
+  benchmark: {
+    avgScore: number;
+    maxScore: number;
+    questionsAnswered: number;
+    totalQuestions: number;
+  } | null;
   firstSeen: string;
   lastSeen: string;
 }

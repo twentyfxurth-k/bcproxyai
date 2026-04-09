@@ -13,13 +13,14 @@ export async function GET() {
 
     // Worker state
     const workerRows = await sql<{ key: string; value: string }[]>`
-      SELECT key, value FROM worker_state WHERE key IN ('status', 'last_run', 'next_run')
+      SELECT key, value FROM worker_state WHERE key IN ('status', 'last_run', 'next_run', 'judge_model')
     `;
     const workerMap = new Map(workerRows.map(r => [r.key, r.value]));
 
     const workerStatus = workerMap.get("status") ?? "idle";
     const lastRun = workerMap.get("last_run") ?? null;
     const nextRun = workerMap.get("next_run") ?? null;
+    const judgeModel = workerMap.get("judge_model") ?? null;
 
     // Total models — cast to int so the postgres driver returns a real JS number
     const totalRows = await sql<{ count: number }[]>`SELECT COUNT(*)::int as count FROM models`;
@@ -67,11 +68,14 @@ export async function GET() {
       FROM worker_logs ORDER BY created_at DESC LIMIT 50
     `;
 
-    // โมเดลใหม่ (first_seen ภายใน 24 ชม.)
+    // โมเดลใหม่ (first_seen ภายใน 24 ชม.) + ตรวจสอบว่าถูก health check แล้วหรือยัง
     const newModels = await sql`
-      SELECT id, name, provider, model_id, context_length, tier, first_seen as "firstSeen"
-      FROM models WHERE first_seen >= now() - interval '24 hours'
-      ORDER BY first_seen DESC
+      SELECT m.id, m.name, m.provider, m.model_id, m.context_length, m.tier,
+             m.first_seen as "firstSeen",
+             EXISTS(SELECT 1 FROM health_logs h WHERE h.model_id = m.id LIMIT 1) AS checked
+      FROM models m
+      WHERE m.first_seen >= now() - interval '24 hours'
+      ORDER BY m.first_seen DESC
     `;
 
     // โมเดลลาออก (last_seen 48h - 7 วัน)
@@ -106,6 +110,7 @@ export async function GET() {
         status: workerStatus,
         lastRun,
         nextRun,
+        judgeModel,
       },
       stats: {
         totalModels: totalCount,

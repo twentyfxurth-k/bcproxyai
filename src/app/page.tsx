@@ -460,7 +460,7 @@ export default function Dashboard() {
               </svg>
             </span>
             <span className="font-bold text-white text-2xl">โครงสร้างระบบ</span>
-            <span className="text-xs text-gray-400 ml-1">Postgres · Redis · Replicas · Rate Limit</span>
+            <span className="text-xs text-gray-400 ml-1">Postgres · Valkey · Replicas · Rate Limit</span>
           </div>
           <InfraPanel />
         </section>
@@ -515,6 +515,12 @@ export default function Dashboard() {
                       <span>เช็คชื่อล่าสุด: <span className="text-gray-300">{fmtTime(statusData?.worker.lastRun ?? null)}</span></span>
                       <span>เช็คชื่อถัดไป: <span className="text-gray-300">{fmtTime(statusData?.worker.nextRun ?? null)}</span></span>
                     </div>
+                    {statusData?.worker.judgeModel && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-gray-600">ตรวจด้วย:</span>
+                        <span className="text-cyan-400 font-mono">{statusData.worker.judgeModel}</span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-3 flex-wrap">
                       {statusData?.worker.nextRun && workerStatus !== "running" && (
                         <div className="flex items-center gap-1.5">
@@ -634,12 +640,14 @@ export default function Dashboard() {
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {providerStatuses.map((p) => {
               const c = PROVIDER_COLORS[p.provider] ?? { text: "text-gray-300", bg: "bg-gray-700/40", border: "border-gray-600/40", glow: "rgba(156,163,175,0.5)" };
-              const statusConfig = {
+              const statusConfig = ({
                 active:    { icon: "\u2705", label: `${p.availableCount}/${p.modelCount} models`, border: "border-emerald-500/30", bg: "bg-emerald-500/5" },
                 no_key:    { icon: "\u{1F511}", label: "ยังไม่มี Key", border: "border-amber-500/30", bg: "bg-amber-500/5" },
                 no_models: { icon: "\u23F3", label: "มี key — รอ scan", border: "border-cyan-500/30", bg: "bg-cyan-500/5" },
                 error:     { icon: "\u{1F6A8}", label: `${p.modelCount} models (offline)`, border: "border-red-500/30", bg: "bg-red-500/5" },
-              }[p.status];
+                disabled:  { icon: "\u{1F6AB}", label: "ปิดใช้งานเอง", border: "border-gray-500/30", bg: "bg-gray-500/5" },
+              } as Record<string, { icon: string; label: string; border: string; bg: string }>)[p.status]
+                ?? { icon: "?", label: p.status, border: "border-gray-500/30", bg: "bg-gray-500/5" };
 
               return (
                 <div
@@ -683,10 +691,19 @@ export default function Dashboard() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {statusData.modelChanges.new.map((m) => (
-                      <span key={m.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300 hover:scale-105 transition-transform cursor-default">
-                        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span key={m.id} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm hover:scale-105 transition-transform cursor-default ${
+                        m.checked
+                          ? "bg-emerald-500/15 border border-emerald-500/30 text-emerald-300"
+                          : "bg-gray-500/10 border border-gray-500/20 text-gray-400"
+                      }`}>
+                        {m.checked ? (
+                          <span className="h-2 w-2 rounded-full bg-emerald-400" title="ตรวจสุขภาพแล้ว" />
+                        ) : (
+                          <span className="h-2 w-2 rounded-full bg-gray-500 animate-pulse" title="รอตรวจสุขภาพ" />
+                        )}
                         {m.name}
-                        <span className="text-xs text-emerald-500/60">({m.provider})</span>
+                        <span className={`text-xs ${m.checked ? "text-emerald-500/60" : "text-gray-600"}`}>({m.provider})</span>
+                        {m.checked && <span className="text-[10px] text-emerald-500/70">✓</span>}
                       </span>
                     ))}
                   </div>

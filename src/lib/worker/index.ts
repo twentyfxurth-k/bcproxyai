@@ -1,12 +1,12 @@
 import { getSqlClient } from "@/lib/db/schema";
 import { scanModels } from "./scanner";
 import { checkHealth } from "./health";
-import { runBenchmarks } from "./benchmark";
+import { runExams } from "./exam";
 import { acquireLeader, renewLeader, releaseLeader } from "./leader";
 
 export { scanModels } from "./scanner";
 export { checkHealth } from "./health";
-export { runBenchmarks } from "./benchmark";
+export { runExams } from "./exam";
 
 export interface WorkerStatus {
   status: "idle" | "running" | "error";
@@ -15,7 +15,7 @@ export interface WorkerStatus {
   stats: {
     scan?: { found: number; new: number };
     health?: { checked: number; available: number; cooldown: number };
-    benchmark?: { tested: number; questions: number };
+    exam?: { examined: number; passed: number; failed: number };
   };
 }
 
@@ -100,7 +100,7 @@ export async function runWorkerCycle(): Promise<void> {
 
   let scanResult = { found: 0, new: 0 };
   let healthResult = { checked: 0, available: 0, cooldown: 0 };
-  const benchmarkResult = { tested: 0, questions: 0 };
+  let examResult = { examined: 0, passed: 0, failed: 0 };
 
   try {
     // Step 1: Scan
@@ -121,18 +121,25 @@ export async function runWorkerCycle(): Promise<void> {
     await logWorker("worker", `Step 2 (health) failed: ${err}`, "error");
   }
 
-  // Step 3: Benchmark — DISABLED (วัดจากการทำงานจริงแทน)
-  // benchmarkResult = await runBenchmarks();
+  await renewLeader();
+
+  try {
+    // Step 3: สอบคัดเลือก — model ต้องผ่านสอบถึงจะได้ทำงาน
+    await logWorker("worker", "Step 3: Exam");
+    examResult = await runExams();
+  } catch (err) {
+    await logWorker("worker", `Step 3 (exam) failed: ${err}`, "error");
+  }
 
   await setState("status", "idle");
   await setState(
     "last_stats",
-    JSON.stringify({ scan: scanResult, health: healthResult, benchmark: benchmarkResult })
+    JSON.stringify({ scan: scanResult, health: healthResult, exam: examResult })
   );
 
   await logWorker(
     "worker",
-    `Cycle complete — scan:${scanResult.found}/${scanResult.new} health:${healthResult.available}/${healthResult.checked} benchmark:${benchmarkResult.tested}/${benchmarkResult.questions}`
+    `Cycle complete — scan:${scanResult.found}/${scanResult.new} health:${healthResult.available}/${healthResult.checked} exam:${examResult.passed}✅/${examResult.failed}❌`
   );
 
   // Release leader lock at end of cycle so it naturally rotates between replicas

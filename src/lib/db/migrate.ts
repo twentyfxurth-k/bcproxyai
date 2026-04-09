@@ -52,22 +52,127 @@ export async function runMigrations(): Promise<void> {
     await sql`CREATE INDEX IF NOT EXISTS idx_health_checked ON health_logs(checked_at)`;
 
     await sql`
-      CREATE TABLE IF NOT EXISTS benchmark_results (
+      CREATE TABLE IF NOT EXISTS exam_attempts (
         id BIGSERIAL PRIMARY KEY,
         model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
-        category TEXT DEFAULT 'general',
+        attempt_number INTEGER NOT NULL,
+        started_at TIMESTAMPTZ DEFAULT now(),
+        finished_at TIMESTAMPTZ,
+        total_questions INTEGER NOT NULL DEFAULT 0,
+        passed_questions INTEGER NOT NULL DEFAULT 0,
+        score_pct REAL NOT NULL DEFAULT 0,
+        passed BOOLEAN NOT NULL DEFAULT false,
+        total_latency_ms INTEGER DEFAULT 0,
+        error TEXT
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_exam_attempts_model ON exam_attempts(model_id, started_at DESC)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_exam_attempts_passed ON exam_attempts(passed, started_at DESC)`;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS exam_answers (
+        id BIGSERIAL PRIMARY KEY,
+        attempt_id BIGINT NOT NULL REFERENCES exam_attempts(id) ON DELETE CASCADE,
+        question_id TEXT NOT NULL,
+        category TEXT NOT NULL,
         question TEXT NOT NULL,
+        expected TEXT,
         answer TEXT,
-        score REAL DEFAULT 0,
-        max_score REAL DEFAULT 10,
-        reasoning TEXT,
-        latency_ms INTEGER DEFAULT 0,
-        tested_at TIMESTAMPTZ DEFAULT now()
+        passed BOOLEAN NOT NULL DEFAULT false,
+        check_method TEXT,
+        fail_reason TEXT,
+        latency_ms INTEGER DEFAULT 0
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_exam_answers_attempt ON exam_answers(attempt_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_exam_answers_qid ON exam_answers(question_id)`;
+
+    // ─── Self-Tuning: Phase 1+2+3 ────────────────────────────────────────────
+    await sql`
+      CREATE TABLE IF NOT EXISTS model_fail_streak (
+        model_id TEXT PRIMARY KEY REFERENCES models(id) ON DELETE CASCADE,
+        streak_count INT NOT NULL DEFAULT 0,
+        last_fail_at TIMESTAMPTZ,
+        last_success_at TIMESTAMPTZ,
+        total_fails INT NOT NULL DEFAULT 0,
+        total_success INT NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT now()
+      )
+    `;
+    await sql`
+      CREATE TABLE IF NOT EXISTS model_capacity (
+        model_id TEXT PRIMARY KEY REFERENCES models(id) ON DELETE CASCADE,
+        max_successful_tokens INT DEFAULT 0,
+        p90_successful_tokens INT DEFAULT 0,
+        avg_successful_tokens INT DEFAULT 0,
+        min_failed_tokens INT,
+        success_count INT DEFAULT 0,
+        fail_count INT DEFAULT 0,
+        avg_latency_ms INT DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT now()
+      )
+    `;
+    await sql`
+      CREATE TABLE IF NOT EXISTS model_samples (
+        id BIGSERIAL PRIMARY KEY,
+        model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+        tokens INT NOT NULL,
+        latency_ms INT NOT NULL,
+        success BOOLEAN NOT NULL,
+        has_tools BOOLEAN DEFAULT false,
+        category TEXT,
+        created_at TIMESTAMPTZ DEFAULT now()
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_model_samples_model ON model_samples(model_id, created_at DESC)`;
+    await sql`
+      CREATE TABLE IF NOT EXISTS category_winners (
+        category TEXT NOT NULL,
+        model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+        wins INT DEFAULT 0,
+        losses INT DEFAULT 0,
+        avg_latency_ms REAL DEFAULT 0,
+        win_streak INT DEFAULT 0,
+        loss_streak INT DEFAULT 0,
+        last_win_at TIMESTAMPTZ,
+        last_loss_at TIMESTAMPTZ,
+        PRIMARY KEY (category, model_id)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_category_winners_cat ON category_winners(category, wins DESC)`;
+    await sql`ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS next_exam_at TIMESTAMPTZ`;
+    await sql`ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS consecutive_fails INT DEFAULT 0`;
+    await sql`
+      CREATE TABLE IF NOT EXISTS discovered_questions (
+        id BIGSERIAL PRIMARY KEY,
+        question_hash TEXT UNIQUE NOT NULL,
+        question TEXT NOT NULL,
+        category TEXT,
+        fail_count INT DEFAULT 1,
+        first_seen_at TIMESTAMPTZ DEFAULT now(),
+        last_seen_at TIMESTAMPTZ DEFAULT now(),
+        promoted BOOLEAN DEFAULT false
       )
     `;
 
-    await sql`CREATE INDEX IF NOT EXISTS idx_benchmark_model ON benchmark_results(model_id)`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_benchmark_category ON benchmark_results(category)`;
+    // Backward-compat view: code เดิมที่อ้าง benchmark_results จะอ่านผลสอบใหม่แทน
+    await sql`DROP TABLE IF EXISTS benchmark_results CASCADE`.catch(() => {});
+    await sql`
+      CREATE OR REPLACE VIEW benchmark_results AS
+      SELECT
+        ea.id,
+        a.model_id,
+        ea.category,
+        ea.question,
+        ea.answer,
+        CASE WHEN ea.passed THEN 10.0 ELSE 0.0 END as score,
+        10.0 as max_score,
+        COALESCE(ea.fail_reason, 'passed') as reasoning,
+        ea.latency_ms,
+        a.started_at as tested_at
+      FROM exam_answers ea
+      INNER JOIN exam_attempts a ON a.id = ea.attempt_id
+    `;
 
     await sql`
       CREATE TABLE IF NOT EXISTS worker_logs (
@@ -107,10 +212,30 @@ export async function runMigrations(): Promise<void> {
 
     await sql`CREATE INDEX IF NOT EXISTS idx_gateway_logs_created ON gateway_logs(created_at)`;
 
+    // ตารางจำ rate limit per provider/model จาก error message + header
     await sql`
-      CREATE TABLE IF NOT EXISTS budget_config (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
+      CREATE TABLE IF NOT EXISTS provider_limits (
+        provider TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        limit_tpm INTEGER,
+        limit_tpd INTEGER,
+        remaining_tpm INTEGER,
+        remaining_tpd INTEGER,
+        reset_tpm_at TIMESTAMPTZ,
+        reset_tpd_at TIMESTAMPTZ,
+        last_429_at TIMESTAMPTZ,
+        source TEXT,
+        updated_at TIMESTAMPTZ DEFAULT now(),
+        PRIMARY KEY (provider, model_id)
+      )
+    `;
+
+    // ตาราง toggle เปิด/ปิด provider โดยผู้ใช้
+    await sql`
+      CREATE TABLE IF NOT EXISTS provider_settings (
+        provider TEXT PRIMARY KEY,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        updated_at TIMESTAMPTZ DEFAULT now()
       )
     `;
 

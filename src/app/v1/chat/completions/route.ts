@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getSqlClient } from "@/lib/db/schema";
-import { getNextApiKey, markKeyCooldown } from "@/lib/api-keys";
+import { getNextApiKey, markKeyCooldown, hasProviderKey } from "@/lib/api-keys";
 import { PROVIDER_URLS } from "@/lib/providers";
 import { clearCache } from "@/lib/cache";
 import { compressMessages } from "@/lib/prompt-compress";
@@ -13,32 +13,21 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { getCachedResponse, setCachedResponse } from "@/lib/response-cache";
 import { recordBattleEvent, outcomeFromLatency } from "@/lib/battle-score";
 import { hasTpmHeadroom, recordTokenConsumption } from "@/lib/tpm-tracker";
+import { recordOutcome, getProviderScore, getModelScore, isRecentlyDead } from "@/lib/live-score";
+import { isProviderEnabledSync } from "@/lib/provider-toggle";
+import { canFitRequest, parseLimitHeaders, parseLimitError, recordLimit } from "@/lib/provider-limits";
+import { recordOutcomeLearning, recordFailStreak, canHandleTokens, getCategoryWinners, detectCategory } from "@/lib/learning";
+
+// Slow threshold แปรผันตาม context size — request ใหญ่ช้ากว่าปกติ
+function slowThresholdMs(estInputTokens: number): number {
+  if (estInputTokens > 20_000) return 15_000;
+  if (estInputTokens > 10_000) return 10_000;
+  if (estInputTokens > 5_000)  return 7_000;
+  return 5_000;
+}
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-// Budget check: returns { ok, percentUsed }
-async function checkBudget(): Promise<{ ok: boolean; preferCheap: boolean; percentUsed: number }> {
-  try {
-    const sql = getSqlClient();
-    const configRows = await sql<{ value: string }[]>`
-      SELECT value FROM budget_config WHERE key = 'daily_token_limit'
-    `;
-    const dailyLimit = configRows.length > 0 ? Number(configRows[0].value) : 1000000;
-
-    const today = new Date().toISOString().slice(0, 10);
-    const usageRows = await sql<{ total: number }[]>`
-      SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS total
-      FROM token_usage WHERE created_at >= ${today + 'T00:00:00'}::timestamptz
-    `;
-    const total = Number(usageRows[0]?.total ?? 0);
-
-    const percentUsed = dailyLimit > 0 ? (total / dailyLimit) * 100 : 0;
-    return { ok: percentUsed < 95, preferCheap: percentUsed >= 80, percentUsed };
-  } catch {
-    return { ok: true, preferCheap: false, percentUsed: 0 };
-  }
-}
 
 async function trackTokenUsage(provider: string, modelId: string, inputTokens: number, outputTokens: number) {
   try {
@@ -271,7 +260,7 @@ const KNOWN_BROKEN_TOOL_MODELS = new Set([
   "openrouter:google/gemma-3n-e4b-it:free",
 ]);
 
-async function getAvailableModels(caps: RequestCapabilities, benchmarkCategory?: string): Promise<ModelRow[]> {
+async function getAvailableModels(caps: RequestCapabilities, benchmarkCategory?: string, estTokens?: number): Promise<ModelRow[]> {
   const sql = getSqlClient();
 
   const visionFilter = caps.hasImages ? `AND m.supports_vision = 1` : "";
@@ -284,32 +273,25 @@ async function getAvailableModels(caps: RequestCapabilities, benchmarkCategory?:
     ? "CASE WHEN m.context_length >= 128000 THEN 0 WHEN m.context_length >= 32000 THEN 1 ELSE 2 END ASC,"
     : "";
 
-  // Use raw SQL for this complex query — includes real production latency from routing_stats
+  // ระบบสอบใหม่: ใช้ exam_attempts เป็น source of truth
+  // ต้อง passed=true ใน attempt ล่าสุดถึงจะได้ทำงาน
+  void benchmarkCategory; // kept for API compat (was used for per-category benchmark)
   const rows = await sql.unsafe(`
     SELECT
       m.id, m.provider, m.model_id, m.supports_tools, m.supports_vision, m.tier, m.context_length,
-      ${benchmarkCategory
-        ? `COALESCE(bcat.avg_score, ball.avg_score_all, 0) as avg_score,
-           COALESCE(rs.avg_lat_real, bcat.avg_latency, ball.avg_latency_all, 9999999) as avg_latency`
-        : `COALESCE(ball.avg_score_all, 0) as avg_score,
-           COALESCE(rs.avg_lat_real, ball.avg_latency_all, 9999999) as avg_latency`
-      },
+      COALESCE(ex.score_pct, 0) as avg_score,
+      COALESCE(rs.avg_lat_real, ex.total_latency_ms::float, 9999999) as avg_latency,
       h.status as health_status,
       h.cooldown_until
       ${visionBoost}
     FROM models m
-    ${benchmarkCategory
-      ? `LEFT JOIN (
-          SELECT model_id, AVG(score) as avg_score, AVG(latency_ms) as avg_latency
-          FROM benchmark_results WHERE category = '${benchmarkCategory.replace(/'/g, "''")}'
-          GROUP BY model_id
-        ) bcat ON m.id = bcat.model_id`
-      : ""
-    }
-    LEFT JOIN (
-      SELECT model_id, AVG(score) as avg_score_all, AVG(latency_ms) as avg_latency_all
-      FROM benchmark_results GROUP BY model_id
-    ) ball ON m.id = ball.model_id
+    INNER JOIN (
+      SELECT DISTINCT ON (model_id)
+        model_id, score_pct, passed, total_latency_ms
+      FROM exam_attempts
+      WHERE finished_at IS NOT NULL
+      ORDER BY model_id, started_at DESC
+    ) ex ON m.id = ex.model_id AND ex.passed = true
     LEFT JOIN (
       SELECT model_id, AVG(latency_ms)::float AS avg_lat_real
       FROM routing_stats
@@ -332,10 +314,9 @@ async function getAvailableModels(caps: RequestCapabilities, benchmarkCategory?:
       ${toolsFilter}
     ORDER BY ${toolsBoost} ${visionOrder}
       ${caps.needsJsonSchema ? "CASE WHEN m.tier = 'large' THEN 0 ELSE 1 END ASC," : ""}
-      CASE WHEN ${benchmarkCategory ? "COALESCE(bcat.avg_score, ball.avg_score_all, 0)" : "COALESCE(ball.avg_score_all, 0)"} > 0 THEN 0 ELSE 1 END ASC,
-      ${benchmarkCategory ? "COALESCE(bcat.avg_score, ball.avg_score_all, 0)" : "COALESCE(ball.avg_score_all, 0)"} DESC,
+      ex.score_pct DESC,
       m.context_length DESC,
-      COALESCE(rs.avg_lat_real, ${benchmarkCategory ? "COALESCE(bcat.avg_latency, ball.avg_latency_all, 9999999)" : "COALESCE(ball.avg_latency_all, 9999999)"}) ASC
+      COALESCE(rs.avg_lat_real, ex.total_latency_ms::float, 9999999) ASC
   `) as ModelRow[];
 
   // Apply Ollama slowness penalty: push Ollama to end if any cloud provider is available
@@ -347,8 +328,12 @@ async function getAvailableModels(caps: RequestCapabilities, benchmarkCategory?:
   const FAST_STREAM_PROVIDERS = new Set(["groq", "cerebras", "together"]);
   if (reorderedRows.length > 1) {
     reorderedRows = [...reorderedRows].sort((a, b) => {
-      const adjA = (a.avg_latency ?? 9999999) - (FAST_STREAM_PROVIDERS.has(a.provider) ? 500 : 0);
-      const adjB = (b.avg_latency ?? 9999999) - (FAST_STREAM_PROVIDERS.has(b.provider) ? 500 : 0);
+      const adjA = (a.avg_latency ?? 9999999)
+        - (FAST_STREAM_PROVIDERS.has(a.provider) ? 500 : 0)
+        + (estTokens != null && estTokens > 10_000 && a.provider === "mistral" ? 5_000 : 0);
+      const adjB = (b.avg_latency ?? 9999999)
+        - (FAST_STREAM_PROVIDERS.has(b.provider) ? 500 : 0)
+        + (estTokens != null && estTokens > 10_000 && b.provider === "mistral" ? 5_000 : 0);
       // Keep Ollama at end regardless
       if (a.provider === "ollama" && b.provider !== "ollama") return 1;
       if (b.provider === "ollama" && a.provider !== "ollama") return -1;
@@ -468,9 +453,13 @@ async function getAllModelsIncludingCooldown(caps: RequestCapabilities): Promise
 
   return await sql.unsafe(`
     SELECT m.id, m.provider, m.model_id, m.supports_tools, m.supports_vision, m.tier, m.context_length,
-      COALESCE(b.avg_score, 0) as avg_score, COALESCE(b.avg_latency, 9999999) as avg_latency
+      COALESCE(ex.score_pct, 0) as avg_score, COALESCE(ex.total_latency_ms::float, 9999999) as avg_latency
     FROM models m
-    LEFT JOIN (SELECT model_id, AVG(score) as avg_score, AVG(latency_ms) as avg_latency FROM benchmark_results GROUP BY model_id) b ON m.id = b.model_id
+    LEFT JOIN (
+      SELECT DISTINCT ON (model_id) model_id, score_pct, total_latency_ms
+      FROM exam_attempts WHERE passed = true
+      ORDER BY model_id, started_at DESC
+    ) ex ON m.id = ex.model_id
     WHERE m.context_length >= 32000
       AND COALESCE(m.supports_embedding, 0) != 1
       AND COALESCE(m.supports_audio_output, 0) != 1
@@ -484,7 +473,8 @@ async function getAllModelsIncludingCooldown(caps: RequestCapabilities): Promise
 async function selectModelsByMode(
   mode: string,
   caps: RequestCapabilities,
-  benchmarkCategory?: string
+  benchmarkCategory?: string,
+  estTokens?: number
 ): Promise<ModelRow[]> {
   const sql = getSqlClient();
 
@@ -493,15 +483,16 @@ async function selectModelsByMode(
     const fastRows = await sql.unsafe(`
       SELECT
         m.id, m.provider, m.model_id, m.supports_tools, m.supports_vision, m.tier, m.context_length,
-        COALESCE(b.avg_score, 0) as avg_score,
-        COALESCE(rs.avg_lat_real, b.avg_latency, 9999999) as avg_latency,
+        ex.score_pct as avg_score,
+        COALESCE(rs.avg_lat_real, ex.total_latency_ms::float, 9999999) as avg_latency,
         h.status as health_status,
         h.cooldown_until
       FROM models m
-      LEFT JOIN (
-        SELECT model_id, AVG(score) as avg_score, AVG(latency_ms) as avg_latency
-        FROM benchmark_results GROUP BY model_id
-      ) b ON m.id = b.model_id
+      INNER JOIN (
+        SELECT DISTINCT ON (model_id) model_id, score_pct, total_latency_ms
+        FROM exam_attempts WHERE passed = true
+        ORDER BY model_id, started_at DESC
+      ) ex ON m.id = ex.model_id
       LEFT JOIN (
         SELECT model_id, AVG(latency_ms)::float AS avg_lat_real
         FROM routing_stats
@@ -523,17 +514,17 @@ async function selectModelsByMode(
         ${visionFilter}
       ORDER BY
         CASE WHEN m.provider = 'ollama' THEN 1 ELSE 0 END ASC,
-        COALESCE(rs.avg_lat_real, b.avg_latency, 9999999) ASC,
-        avg_score DESC
+        COALESCE(rs.avg_lat_real, ex.total_latency_ms::float, 9999999) ASC,
+        ex.score_pct DESC
     `) as ModelRow[];
     return fastRows;
   }
 
   if (mode === "tools") {
-    return getAvailableModels({ ...caps, hasTools: true }, benchmarkCategory);
+    return getAvailableModels({ ...caps, hasTools: true }, benchmarkCategory, estTokens);
   }
 
-  return getAvailableModels(caps, benchmarkCategory);
+  return getAvailableModels(caps, benchmarkCategory, estTokens);
 }
 
 async function forwardToProvider(
@@ -687,8 +678,21 @@ async function forwardToProvider(
     requestBody.options = { ...(requestBody.options as Record<string, unknown> ?? {}), num_ctx: 65536 };
   }
 
-  // P0-2: 8s per-attempt timeout for cloud providers, 25s for Ollama (local model load time)
-  const timeoutMs = provider === "ollama" ? 25_000 : 8_000;
+  // Per-attempt timeout — scaled by estimated body size
+  // Small: 8s, Medium (5K+): 15s, Large (10K+): 25s, Ollama: 30s
+  const bodySize = JSON.stringify(body).length;
+  let timeoutMs: number;
+  if (provider === "ollama") {
+    timeoutMs = 30_000;
+  } else if (bodySize > 40_000) {
+    timeoutMs = 30_000; // 10K+ tokens
+  } else if (bodySize > 20_000) {
+    timeoutMs = 20_000; // 5K+ tokens
+  } else if (bodySize > 10_000) {
+    timeoutMs = 12_000;
+  } else {
+    timeoutMs = 8_000;
+  }
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = externalSignal
     ? AbortSignal.any([timeoutSignal, externalSignal])
@@ -782,6 +786,8 @@ function cleanResponseContent(content: string): string {
   return content.replace(THINK_TAG_RE, "").trim();
 }
 
+let _staleModelsCleanedUp = false;
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as Record<string, unknown>;
@@ -804,7 +810,10 @@ export async function POST(req: NextRequest) {
     const caps = detectRequestCapabilities(body);
     const _reqTime = Date.now();
     const _reqMsg = extractUserMessage(body)?.slice(0, 80) ?? "-";
-    console.log(`[REQ] ${modelField} | stream=${isStream} | img=${caps.hasImages} | tools=${caps.hasTools} | "${_reqMsg}"`);
+    const _reqId = Math.random().toString(36).slice(2, 8); // short id สำหรับไล่ log
+    const _msgCount = Array.isArray(body.messages) ? (body.messages as unknown[]).length : 0;
+    const _estTokensInit = estimateTokens(body);
+    console.log(`[REQ:${_reqId}] ${modelField} | stream=${isStream} | img=${caps.hasImages} | tools=${caps.hasTools} | msgs=${_msgCount} | est=${_estTokensInit}tok | "${_reqMsg}"`);
 
     // Rate limiting — 100 req/60s per IP
     // Caddy sets X-Real-IP and X-Forwarded-For to exactly the true client IP
@@ -833,13 +842,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Budget check — block at 95%
-    const budget = await checkBudget();
-    if (!budget.ok) {
-      return openAIError(429, {
-        message: `Daily budget exceeded (${budget.percentUsed.toFixed(1)}% used). Try again tomorrow or increase limit via /api/budget`,
-        code: "rate_limit_exceeded",
-      });
+    // Fix B: Fire-and-forget — put known-stale Cerebras models on 365-day cooldown
+    if (!_staleModelsCleanedUp) {
+      _staleModelsCleanedUp = true;
+      getSqlClient()`
+        INSERT INTO health_logs (model_id, status, error, cooldown_until, checked_at)
+        SELECT m.id, 'available', 'stale model removed from API', now() + interval '365 days', now()
+        FROM models m
+        WHERE m.provider = 'cerebras'
+          AND m.model_id IN ('gpt-oss-120b', 'zai-glm-4.7', 'qwen-3-32b-fast-scheduler-offline')
+          AND NOT EXISTS (
+            SELECT 1 FROM health_logs h WHERE h.model_id = m.id AND h.cooldown_until > now() + interval '100 days'
+          )
+      `.catch(() => {});
     }
 
     // Improvement C: response cache check (non-stream, low-temperature, no tools)
@@ -868,10 +883,6 @@ export async function POST(req: NextRequest) {
     }
 
     const parsed = parseModelField(modelField);
-
-    if (budget.preferCheap && parsed.mode === "auto") {
-      parsed.mode = "fast" as typeof parsed.mode;
-    }
 
     const estInputTokens = estimateTokens(body);
     const promptCategory = detectPromptCategory(extractUserMessage(body) ?? "");
@@ -944,11 +955,19 @@ export async function POST(req: NextRequest) {
     if (parsed.mode === "direct") {
       const { provider, modelId } = parsed;
       const response = await forwardToProvider(provider!, modelId!, body, isStream);
+      // Parse rate limit headers regardless of success/fail
+      const hdrLimit = parseLimitHeaders(response.headers);
+      if (hdrLimit) recordLimit(provider!, modelId!, hdrLimit).catch(() => {});
+
       if (!response.ok && isRetryableStatus(response.status)) {
         const errText = await response.text();
+        if (response.status === 429) {
+          const parsed429 = parseLimitError(errText);
+          if (parsed429) recordLimit(provider!, modelId!, parsed429).catch(() => {});
+        }
         return openAIError(response.status, { message: errText || `Provider ${provider} returned ${response.status}` });
       }
-      console.log(`[RES] ${response.status} | ${provider}/${modelId} | ${Date.now() - _reqTime}ms | direct`);
+      console.log(`[RES:${_reqId}] ${response.status} | ${provider}/${modelId} | ${Date.now() - _reqTime}ms | direct`);
       return buildProxiedResponse(response, provider!, modelId!, isStream, estInputTokens);
     }
 
@@ -969,13 +988,13 @@ export async function POST(req: NextRequest) {
         const errText = await response.text();
         return openAIError(response.status, { message: errText || `Provider ${row.provider} returned ${response.status}` });
       }
-      console.log(`[RES] ${response.status} | ${row.provider}/${row.model_id} | ${Date.now() - _reqTime}ms | match`);
+      console.log(`[RES:${_reqId}] ${response.status} | ${row.provider}/${row.model_id} | ${Date.now() - _reqTime}ms | match`);
       return buildProxiedResponse(response, row.provider, row.model_id, isStream, estInputTokens);
     }
 
     // ---- Smart routing: auto / fast / tools / thai ----
     const benchmarkCategory = caps.hasImages ? "vision" : promptCategory;
-    const candidates = await selectModelsByMode(parsed.mode, caps, benchmarkCategory);
+    const candidates = await selectModelsByMode(parsed.mode, caps, benchmarkCategory, estInputTokens);
     if (process.env.LOG_LEVEL === "debug") {
       const candByProv: Record<string, number> = {};
       candidates.forEach(c => candByProv[c.provider] = (candByProv[c.provider] || 0) + 1);
@@ -1005,21 +1024,48 @@ export async function POST(req: NextRequest) {
 
     let finalCandidates = candidates;
     if (finalCandidates.length === 0) {
-      finalCandidates = await selectModelsByMode(parsed.mode, caps, benchmarkCategory);
+      finalCandidates = await selectModelsByMode(parsed.mode, caps, benchmarkCategory, estInputTokens);
     }
     if (finalCandidates.length === 0) {
       finalCandidates = await getAllModelsIncludingCooldown(caps);
     }
     if (finalCandidates.length === 0) {
-      return openAIError(503, { message: "No models available. Worker scan has not completed yet." });
+      const reason = "ไม่มี model ในระบบ — รอ worker scan";
+      await logGateway(modelField, null, null, 503, Date.now() - _reqTime, 0, 0, reason, extractUserMessage(body), null);
+      return openAIError(503, { message: reason });
     }
 
     const MAX_RETRIES = 10;
     let lastError = "";
+    let lastProvider: string | null = null;
+    let lastModelId: string | null = null;
     const startTime = Date.now();
     const userMsg = extractUserMessage(body);
     const triedProviders = new Set<string>();
     const blockedProviders = new Set<string>();
+
+    // กรอง provider ที่ไม่มี API key ออก (ใช้งานไม่ได้แน่นอน)
+    finalCandidates = finalCandidates.filter(c => hasProviderKey(c.provider));
+    // กรอง provider ที่ผู้ใช้ปิดเองผ่าน UI
+    finalCandidates = finalCandidates.filter(c => isProviderEnabledSync(c.provider));
+
+    // ── Category boost: ดัน model ที่เก่ง category นี้ขึ้นบน ──
+    const learningCategory = detectCategory(
+      extractUserMessage(body) ?? "",
+      caps.hasTools,
+      caps.hasImages,
+      estInputTokens
+    );
+    const categoryWinnerIds = await getCategoryWinners(learningCategory, 5);
+    if (categoryWinnerIds.length > 0) {
+      const winnerSet = new Set(categoryWinnerIds);
+      const winners = finalCandidates.filter(c => winnerSet.has(c.id));
+      const others = finalCandidates.filter(c => !winnerSet.has(c.id));
+      finalCandidates = [...winners, ...others];
+      if (winners.length > 0) {
+        console.log(`[CATEGORY-BOOST:${_reqId}] "${learningCategory}" → ${winners.length} winners: ${winners.slice(0,3).map(w => w.provider+'/'+w.model_id).join(', ')}`);
+      }
+    }
 
     // Filter out provider cooldowns BEFORE retry loop (async Redis check)
     const cooldownChecks = await Promise.all(finalCandidates.map(c => isProviderCooledDownMem(c.provider)));
@@ -1033,7 +1079,12 @@ export async function POST(req: NextRequest) {
     const estTokens = estimateTokens(body);
     const requiredContext = Math.ceil(estTokens * 1.4); // 30% headroom for response + safety margin
     const sizeFiltered = finalCandidates.filter(c => {
-      if (!c.context_length || c.context_length >= requiredContext) return true;
+      // context_length = 0 หรือ null → ไม่รู้ขนาด ถือว่าไม่ปลอดภัย ข้าม
+      if (!c.context_length || c.context_length === 0) {
+        console.log(`[SIZE-SKIP] ${c.provider}/${c.model_id} unknown context (0) — required ${requiredContext}`);
+        return false;
+      }
+      if (c.context_length >= requiredContext) return true;
       console.log(`[SIZE-SKIP] ${c.provider}/${c.model_id} context ${c.context_length} < required ${requiredContext}`);
       return false;
     });
@@ -1045,54 +1096,97 @@ export async function POST(req: NextRequest) {
       console.log(`[SIZE-SKIP] All candidates too small for ${requiredContext} tokens — using full list as fallback`);
     }
 
-    // Weighted Load Balancing
-    let spreadCandidates: typeof finalCandidates;
+    // ─── Provider-first selection ─────────────────────────────────────────
+    // ขั้นตอน:
+    //   1. ตัดทิ้ง model ที่เพิ่ง fail ติดกัน (isRecentlyDead)
+    //   2. Group ตาม provider
+    //   3. จัดอันดับ provider ด้วย live success rate + benchmark score - latency
+    //   4. ใน provider แต่ละตัว จัดอันดับ model ด้วย live score + benchmark
+    //   5. Flatten: [best provider's models..., next provider's models..., ...]
+    //      (ไม่ round-robin — ถ้า provider ไหนดี ลอง model ดีๆ ของมันให้หมดก่อน)
+    const preFilteredCandidates = finalCandidates.filter(
+      c => !isRecentlyDead(c.provider, c.model_id)
+    );
+    const poolCandidates = preFilteredCandidates.length > 0 ? preFilteredCandidates : finalCandidates;
 
-    if (caps.hasTools) {
-      const nonOllama = finalCandidates.filter(c => c.provider !== "ollama");
-      const ollama = finalCandidates.filter(c => c.provider === "ollama");
-      spreadCandidates = [...nonOllama, ...ollama];
-    } else {
-      spreadCandidates = [];
-      const byProvider: Record<string, typeof finalCandidates> = {};
-      for (const c of finalCandidates) {
-        (byProvider[c.provider] ??= []).push(c);
-      }
-      const providerOrder = await Promise.all(
-        Object.entries(byProvider).map(async ([prov, models]) => {
-          const avgLat = models.reduce((s, m) => s + (m.avg_latency ?? 9999999), 0) / models.length;
-          const avgScore = models.reduce((s, m) => s + (m.avg_score ?? 0), 0) / models.length;
-          const repScores = await Promise.all(models.map(m => getReputationScore(m.id)));
-          const avgRep = repScores.reduce((s, r) => s + r, 0) / repScores.length;
-          const weight = prov === "ollama" ? -Infinity : avgScore * 1000 * (avgRep / 100) - avgLat;
-          return { models, weight };
-        })
-      );
-      providerOrder.sort((a, b) => b.weight - a.weight);
-      let hasMore = true;
-      let round = 0;
-      const totalExpected = finalCandidates.length;
-      while (hasMore && spreadCandidates.length < totalExpected) {
-        hasMore = false;
-        for (const { models: provModels } of providerOrder) {
-          if (round < provModels.length) {
-            spreadCandidates.push(provModels[round]);
-            hasMore = true;
-          }
+    const byProvider: Record<string, typeof finalCandidates> = {};
+    for (const c of poolCandidates) {
+      (byProvider[c.provider] ??= []).push(c);
+    }
+
+    const providerRanking = await Promise.all(
+      Object.entries(byProvider).map(async ([prov, models]) => {
+        const liveP = getProviderScore(prov);
+        const avgBenchLat = models.reduce((s, m) => s + (m.avg_latency ?? 9999999), 0) / models.length;
+        const avgBenchScore = models.reduce((s, m) => s + (m.avg_score ?? 0), 0) / models.length;
+        const repScores = await Promise.all(models.map(m => getReputationScore(m.id)));
+        const avgRep = repScores.reduce((s, r) => s + r, 0) / repScores.length;
+
+        // Weight: live success rate ถ่วงหลัก + benchmark score + inverse latency
+        // Ollama ดันไปท้ายเสมอ (local ช้า reserve เป็น fallback)
+        let weight: number;
+        if (prov === "ollama") {
+          weight = -Infinity;
+        } else {
+          weight =
+            liveP.successRate * 100_000 +        // live success rate น้ำหนักสูงสุด
+            avgBenchScore * 1_000 * (avgRep / 100) -  // benchmark + reputation
+            Math.min(liveP.avgLatency, avgBenchLat) / 10; // latency penalty
         }
-        round++;
-      }
+        return { prov, models, weight, liveScore: liveP };
+      })
+    );
+    providerRanking.sort((a, b) => b.weight - a.weight);
+
+    {
+      const rankLog = providerRanking.slice(0, 5).map(r =>
+        `${r.prov}(${(r.liveScore.successRate * 100).toFixed(0)}%/${Math.round(r.liveScore.avgLatency)}ms/n=${r.liveScore.samples})`
+      ).join(" > ");
+      console.log(`[PROVIDER-RANK:${_reqId}] ${rankLog}`);
+      console.log(`[CANDIDATES:${_reqId}] ${finalCandidates.length} candidates | top5: ${finalCandidates.slice(0,5).map(c => `${c.provider}/${c.model_id}(ctx=${c.context_length})`).join(", ")}`);
+    }
+
+    // ภายในแต่ละ provider เรียง model ตาม live-score + benchmark
+    const spreadCandidates: typeof finalCandidates = [];
+    for (const { models } of providerRanking) {
+      const sortedModels = [...models].sort((a, b) => {
+        const la = getModelScore(a.id);
+        const lb = getModelScore(b.id);
+        const scoreA = la.successRate * 10_000 + (a.avg_score ?? 0) * 100 - Math.min(la.avgLatency, a.avg_latency ?? 9999) / 100;
+        const scoreB = lb.successRate * 10_000 + (b.avg_score ?? 0) * 100 - Math.min(lb.avgLatency, b.avg_latency ?? 9999) / 100;
+        return scoreB - scoreA;
+      });
+      spreadCandidates.push(...sortedModels);
     }
 
     if (process.env.LOG_LEVEL === "debug") console.log(`[DEBUG] spread=${spreadCandidates.length} top5=[${spreadCandidates.slice(0,5).map(c=>c.provider+'/'+c.model_id).join(', ')}]`);
 
-    const TOTAL_TIMEOUT_MS = 20_000;
+    // ถ้าไม่มี candidate เหลือเลยหลังผ่าน filter — ตอบ 503 พร้อม log ที่อ่านออก
+    if (spreadCandidates.length === 0) {
+      const reason = caps.hasImages
+        ? "ไม่มี vision model พร้อมใช้งาน"
+        : caps.hasTools
+          ? "ไม่มี tool-calling model พร้อมใช้งาน"
+          : "ทุก model ติด cooldown หรือขาด API key";
+      const latency = Date.now() - startTime;
+      await logGateway(modelField, null, null, 503, latency, 0, 0, reason, userMsg, null);
+      console.log(`[RES:${_reqId}] 503 | no candidates | ${reason}`);
+      return openAIError(503, { message: reason });
+    }
+
+    // Total retry budget — ให้เวลาพอสำหรับ request ใหญ่ที่ model ต้องประมวลผลนาน
+    const TOTAL_TIMEOUT_MS =
+      estTokens > 20_000 ? 60_000 :
+      estTokens > 10_000 ? 45_000 :
+      estTokens > 5_000  ? 30_000 :
+      20_000;
 
     // Improvement A: parallel hedge top-2 cloud candidates (skip for stream / tools)
     let hedgeStartIdx = 0;
     if (
       !isStream &&
       !caps.hasTools &&
+      estTokens <= 15_000 &&
       spreadCandidates.length >= 2 &&
       spreadCandidates[0].provider !== "ollama" &&
       spreadCandidates[1].provider !== "ollama"
@@ -1135,10 +1229,23 @@ export async function POST(req: NextRequest) {
             await logGateway(modelField, winner.model_id, winner.provider, 200, latency,
               usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0, null, userMsg, content?.slice(0, 500) ?? null);
             await recordRoutingResult(winner.id, winner.provider, promptCategory, true, latency);
+            recordOutcome(winner.provider, winner.model_id, true, latency);
+            recordOutcomeLearning({
+              modelId: winner.id, provider: winner.provider,
+              tokens: estInputTokens, latencyMs: latency, success: true,
+              hasTools: caps.hasTools, hasImages: caps.hasImages,
+              userMessage: extractUserMessage(body) ?? "",
+            }).catch(() => {});
+            const slowThr = slowThresholdMs(estTokens);
+            if (latency > slowThr) {
+              await logCooldown(winner.id, `slow hedge winner: ${latency}ms > ${slowThr}ms threshold`, 0, 2);
+              recordOutcome(winner.provider, winner.model_id, false, latency);
+              console.log(`[SLOW-COOLDOWN] ${winner.provider}/${winner.model_id} ${latency}ms > ${slowThr}ms → 2min cooldown`);
+            }
             await trackTokenUsage(winner.provider, winner.model_id, usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0);
             // P4: record token consumption for TPM tracking
             const hedgeTotalTokens = (usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0);
-            recordTokenConsumption(winner.provider, hedgeTotalTokens).catch(() => {});
+            recordTokenConsumption(winner.provider, winner.model_id, hedgeTotalTokens).catch(() => {});
             recordBattleEvent(outcomeFromLatency(latency, true)).catch(() => { /* cosmetic */ });
             if (content) {
               setCachedResponse(body, { content, provider: winner.provider, model: winner.model_id }).catch(() => { /* non-critical */ });
@@ -1149,7 +1256,7 @@ export async function POST(req: NextRequest) {
             hedgeHeaders.set("X-BCProxy-Model", winner.model_id);
             hedgeHeaders.set("X-BCProxy-Hedge", "true");
             hedgeHeaders.set("Access-Control-Allow-Origin", "*");
-            console.log(`[RES] 200 | ${winner.provider}/${winner.model_id} | ${latency}ms | hedge | "${_reqMsg}"`);
+            console.log(`[RES:${_reqId}] 200 | ${winner.provider}/${winner.model_id} | ${latency}ms | hedge | "${_reqMsg}"`);
             return new Response(JSON.stringify(json), { status: 200, headers: hedgeHeaders });
           }
         } catch {
@@ -1168,6 +1275,10 @@ export async function POST(req: NextRequest) {
       hedgeStartIdx = 2;
     }
 
+    // Track skipped candidates for possible second-pass retry
+    const skippedCandidates: typeof spreadCandidates = [];
+    const skipReasons: string[] = [];
+
     for (let i = hedgeStartIdx, tried = 0; i < spreadCandidates.length && tried < MAX_RETRIES; i++) {
       if (Date.now() - startTime > TOTAL_TIMEOUT_MS) {
         console.log(`[TIMEOUT] Total retry time exceeded ${TOTAL_TIMEOUT_MS}ms — stopping`);
@@ -1175,9 +1286,9 @@ export async function POST(req: NextRequest) {
       }
       const candidate = spreadCandidates[i];
       const { provider, model_id: actualModelId, id: dbModelId } = candidate;
-      if (blockedProviders.has(provider)) continue;
-      if (await isProviderCooledDownMem(provider)) continue;
-      if (await isCircuitOpen(provider)) { console.log(`[CIRCUIT-SKIP] ${provider} circuit open`); continue; }
+      if (blockedProviders.has(provider)) { skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:blocked`); continue; }
+      if (await isProviderCooledDownMem(provider)) { skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:provider-cooldown`); continue; }
+      if (await isCircuitOpen(provider)) { skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:circuit-open`); console.log(`[CIRCUIT-SKIP] ${provider} circuit open`); continue; }
       tried++;
       triedProviders.add(provider);
       // Record attempt for sample-size guard (regardless of outcome)
@@ -1189,6 +1300,8 @@ export async function POST(req: NextRequest) {
         if (hasCloudAlternative) {
           const loaded = await isOllamaModelLoaded(actualModelId);
           if (!loaded) {
+            skippedCandidates.push(candidate);
+            skipReasons.push(`${provider}/${actualModelId}:cold-ollama`);
             console.log(`[OLLAMA-SKIP] ${actualModelId} not loaded in memory — skipping (cloud alternatives available)`);
             continue;
           }
@@ -1199,6 +1312,8 @@ export async function POST(req: NextRequest) {
       if (provider === "ollama" && caps.hasTools) {
         const hasCloudLeft = spreadCandidates.slice(i).some(c => c.provider !== "ollama" && !blockedProviders.has(c.provider));
         if (hasCloudLeft) {
+          skippedCandidates.push(candidate);
+          skipReasons.push(`${provider}/${actualModelId}:ollama-no-tools`);
           console.log(`[OLLAMA-SKIP-TOOLS] ${actualModelId} — tools requested, cloud alternatives exist`);
           continue;
         }
@@ -1207,13 +1322,36 @@ export async function POST(req: NextRequest) {
       // P2: Skip known-broken tool models
       const candidateKey = `${provider}:${actualModelId}`;
       if (caps.hasTools && KNOWN_BROKEN_TOOL_MODELS.has(candidateKey)) {
+        skippedCandidates.push(candidate);
+        skipReasons.push(`${provider}/${actualModelId}:known-broken-tools`);
         console.log(`[BROKEN-TOOL-SKIP] ${candidateKey} — known broken tool support`);
         continue;
       }
 
       // P4: Skip if provider TPM budget is exhausted
       const estProjected = estTokens + 2000; // estimated response budget
-      if (!(await hasTpmHeadroom(provider, estProjected))) {
+      if (!(await hasTpmHeadroom(provider, actualModelId, estProjected))) {
+        skippedCandidates.push(candidate);
+        skipReasons.push(`${provider}/${actualModelId}:tpm-exhausted`);
+        continue;
+      }
+
+      // P4b: Pre-check จาก provider_limits (learned from 429 + headers)
+      const fitCheck = await canFitRequest(provider, actualModelId, estProjected);
+      if (!fitCheck.ok) {
+        skippedCandidates.push(candidate);
+        const tag = fitCheck.reason?.startsWith("TPM hard") || fitCheck.reason?.startsWith("TPD hard") ? "limit-hard" : "limit-exhausted";
+        skipReasons.push(`${provider}/${actualModelId}:${tag}`);
+        console.log(`[LIMIT-SKIP:${_reqId}] ${provider}/${actualModelId} — ${fitCheck.reason}`);
+        continue;
+      }
+
+      // P4c: Pre-check จาก learned capacity (p90/max/min_failed per model)
+      const capCheck = await canHandleTokens(dbModelId, estTokens);
+      if (!capCheck.ok) {
+        skippedCandidates.push(candidate);
+        skipReasons.push(`${provider}/${actualModelId}:capacity`);
+        console.log(`[CAPACITY-SKIP:${_reqId}] ${provider}/${actualModelId} — ${capCheck.reason}`);
         continue;
       }
 
@@ -1232,6 +1370,11 @@ export async function POST(req: NextRequest) {
           const latency = Date.now() - startTime;
           await recordProviderSuccessMem(provider);
           if (wasProbing) await recordCircuitProbeResult(provider, true);
+          // Parse rate limit headers (Groq/OpenAI-style) → learn limit
+          const headerLimit = parseLimitHeaders(response.headers);
+          if (headerLimit) {
+            recordLimit(provider, actualModelId, headerLimit).catch(() => {});
+          }
           const SLOW_THRESHOLD_MS = 10_000;
           const SLOW_COOLDOWN_MINUTES = 10;
           if (latency > SLOW_THRESHOLD_MS && provider !== "ollama") {
@@ -1271,7 +1414,10 @@ export async function POST(req: NextRequest) {
                 console.log(`[BAD-RESPONSE] ${provider}/${actualModelId} — ${badReason}: "${content.slice(0, 100)}"`);
                 await logCooldown(dbModelId, badReason, 0, 5);
                 await recordRoutingResult(dbModelId, provider, promptCategory, false, latency);
+                recordOutcome(provider, actualModelId, false, latency);
                 lastError = `${provider}/${actualModelId}: ${badReason}`;
+                lastProvider = provider;
+                lastModelId = actualModelId;
                 continue;
               }
 
@@ -1284,6 +1430,20 @@ export async function POST(req: NextRequest) {
               await logGateway(modelField, actualModelId, provider, 200, latency,
                 usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0, null, userMsg, content?.slice(0, 500) ?? null);
               await recordRoutingResult(dbModelId, provider, promptCategory, true, latency);
+              recordOutcome(provider, actualModelId, true, latency);
+              recordOutcomeLearning({
+                modelId: dbModelId, provider,
+                tokens: estInputTokens, latencyMs: latency, success: true,
+                hasTools: caps.hasTools, hasImages: caps.hasImages,
+                userMessage: extractUserMessage(body) ?? "",
+              }).catch(() => {});
+              // ช้าเกิน threshold → cooldown ถึงแม้จะตอบสำเร็จ (threshold แปรตาม context size)
+              const slowThrNon = slowThresholdMs(estTokens);
+              if (latency > slowThrNon) {
+                await logCooldown(dbModelId, `slow response: ${latency}ms > ${slowThrNon}ms threshold`, 0, 2);
+                recordOutcome(provider, actualModelId, false, latency);
+                console.log(`[SLOW-COOLDOWN] ${provider}/${actualModelId} ${latency}ms > ${slowThrNon}ms → 2min cooldown`);
+              }
 
               const headers = new Headers();
               headers.set("Content-Type", "application/json");
@@ -1304,13 +1464,13 @@ export async function POST(req: NextRequest) {
               await trackTokenUsage(provider, actualModelId, usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0);
               // P4: record token consumption for TPM tracking
               const totalTokens = (usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0);
-              recordTokenConsumption(provider, totalTokens).catch(() => {});
+              recordTokenConsumption(provider, actualModelId, totalTokens).catch(() => {});
               // Improvement C: store in response cache (non-stream, low-temp, no tools)
               if (content) {
                 setCachedResponse(body, { content, provider, model: actualModelId }).catch(() => { /* non-critical */ });
               }
               recordBattleEvent(outcomeFromLatency(latency, true)).catch(() => { /* cosmetic */ });
-              console.log(`[RES] 200 | ${provider}/${actualModelId} | ${latency}ms | "${_reqMsg}"`);
+              console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${latency}ms | "${_reqMsg}"`);
               return new Response(JSON.stringify(json), { status: 200, headers });
             } catch {
               // JSON parse failed — fall through
@@ -1320,29 +1480,92 @@ export async function POST(req: NextRequest) {
           const proxied = await buildProxiedResponse(response, provider, actualModelId, isStream, estInputTokens);
           const streamLatency = Date.now() - startTime;
           await recordRoutingResult(dbModelId, provider, promptCategory, true, streamLatency);
+          recordOutcome(provider, actualModelId, true, streamLatency);
+          const slowThrStream = slowThresholdMs(estTokens);
+          if (streamLatency > slowThrStream) {
+            await logCooldown(dbModelId, `slow stream: ${streamLatency}ms > ${slowThrStream}ms threshold`, 0, 2);
+            recordOutcome(provider, actualModelId, false, streamLatency);
+            console.log(`[SLOW-COOLDOWN] ${provider}/${actualModelId} ${streamLatency}ms > ${slowThrStream}ms → 2min cooldown`);
+          }
           await logGateway(modelField, actualModelId, provider, 200, streamLatency, 0, 0, null, userMsg, "[stream]");
           recordBattleEvent(outcomeFromLatency(streamLatency, true)).catch(() => { /* cosmetic */ });
-          console.log(`[RES] 200 | ${provider}/${actualModelId} | ${streamLatency}ms | "${_reqMsg}"`);
+          console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${streamLatency}ms | "${_reqMsg}"`);
           return proxied;
         }
 
         const errText = await response.text().catch(() => "");
         lastError = `${provider}/${actualModelId}: HTTP ${response.status}`;
-        await recordRoutingResult(dbModelId, provider, promptCategory, false, Date.now() - startTime);
+        lastProvider = provider;
+        lastModelId = actualModelId;
+        const failLatency = Date.now() - startTime;
+        await recordRoutingResult(dbModelId, provider, promptCategory, false, failLatency);
+        recordOutcome(provider, actualModelId, false, failLatency);
+        recordOutcomeLearning({
+          modelId: dbModelId, provider,
+          tokens: estInputTokens, latencyMs: failLatency, success: false,
+          hasTools: caps.hasTools, hasImages: caps.hasImages,
+          userMessage: extractUserMessage(body) ?? "",
+          failReason: errText.slice(0, 200),
+        }).catch(() => {});
         await recordProviderFailureMem(provider);
         await recordCircuitFailure(provider);
         if (wasProbing) await recordCircuitProbeResult(provider, false);
         const st = response.status;
-        console.log(`[RETRY] ${tried}/${MAX_RETRIES} | ${provider}/${actualModelId} → HTTP ${st} | ${errText.slice(0, 200)}`);
-        if (provider !== "ollama" && (st === 400 || st === 402 || st === 429 || st === 413 || st === 422 || st === 410 || st === 404 || st >= 500 || st === 401 || st === 403)) {
-          await logCooldown(dbModelId, `HTTP ${st}: ${errText}`, st);
-          if (st === 402) {
-            await cooldownProvider(provider, st, errText.slice(0, 200));
-            blockedProviders.add(provider);
-            await emitEvent("provider_error", `${provider} quota หมด (HTTP 402)`, errText.slice(0, 200), provider, actualModelId, "error");
+        console.log(`[RETRY:${_reqId}] ${tried}/${MAX_RETRIES} | ${provider}/${actualModelId} → HTTP ${st} | ${errText.slice(0, 200)}`);
+
+        // Learn limit จาก 429 error message
+        if (st === 429) {
+          const parsed = parseLimitError(errText);
+          if (parsed) {
+            recordLimit(provider, actualModelId, parsed).catch(() => {});
           }
-          if (st === 429 || st === 401 || st === 403) blockedProviders.add(provider);
-          if (st === 404) blockedProviders.add(provider);
+        }
+        // Learn limit จาก response header ด้วย (บาง provider ส่งมาใน fail response)
+        const failHeaderLimit = parseLimitHeaders(response.headers);
+        if (failHeaderLimit) {
+          recordLimit(provider, actualModelId, failHeaderLimit).catch(() => {});
+        }
+
+        // ทุก non-2xx → exponential cooldown → request ถัดไปจะไม่เลือกซ้ำ
+        if (st === 400 || st === 402 || st === 429 || st === 413 || st === 422 || st === 410 || st === 404 || st >= 500 || st === 401 || st === 403) {
+          // TPD (per-day) limit — groq/gemini ฯลฯ คืน 429 + "daily" หรือ TPD → cooldown 24 ชม.
+          const isDailyLimit = st === 429 && /tokens per day|TPD|daily limit|quota exceeded for today/i.test(errText);
+          if (isDailyLimit) {
+            await logCooldown(dbModelId, `TPD exhausted: ${errText.slice(0, 150)}`, 429, 24 * 60);
+            console.log(`[TPD-EXHAUST] ${provider}/${actualModelId} → 24h cooldown`);
+          } else if (st === 413 || st === 422 || /context_length|too large/i.test(errText)) {
+            // Hard error — cooldown model นาน (ไม่ retry)
+            await logCooldown(dbModelId, `HTTP ${st}: ${errText}`, st, 30);
+          } else {
+            // Exponential cooldown: 1m → 2 → 4 → 8 → 16 → 60 min
+            const streakCooldownMs = await recordFailStreak(dbModelId);
+            const streakMin = Math.round(streakCooldownMs / 60_000);
+            await logCooldown(dbModelId, `HTTP ${st}: ${errText}`, st, streakMin);
+            console.log(`[EXPO-COOLDOWN:${_reqId}] ${provider}/${actualModelId} → ${streakMin}min (exponential)`);
+          }
+          // ระบบใช้ free model หลายตัวต่อ provider — cooldown ที่ model เท่านั้น
+          // ยกเว้น 401/403 (auth key พัง → กระทบทุก model ใน provider เดียวกัน)
+          if (st === 401 || st === 403) blockedProviders.add(provider);
+          if (st === 402) {
+            await emitEvent("provider_error", `${provider}/${actualModelId} quota หมด (HTTP 402)`, errText.slice(0, 200), provider, actualModelId, "error");
+          }
+          if (st === 404) {
+            // Auto-deactivate after 3 consecutive 404s (stale model)
+            try {
+              const redis = getRedis();
+              const notFoundKey = `404count:${dbModelId}`;
+              const count = await redis.incr(notFoundKey);
+              await redis.expire(notFoundKey, 86400); // 24h window
+              if (count >= 3) {
+                await getSqlClient()`
+                  INSERT INTO health_logs (model_id, status, error, cooldown_until, checked_at)
+                  VALUES (${dbModelId}, 'available', 'auto-deactivated: 3x consecutive 404', now() + interval '30 days', now())
+                  ON CONFLICT DO NOTHING
+                `;
+                console.log(`[AUTO-DEACTIVATE] ${provider}/${actualModelId} — 3x 404, cooldown 30 days`);
+              }
+            } catch { /* silent */ }
+          }
           if (st === 410) {
             await emitEvent("provider_error", `${provider}/${actualModelId} ถูกถอดแล้ว (HTTP 410 Gone)`, errText.slice(0, 200), provider, actualModelId, "error");
           } else if (st >= 500) {
@@ -1354,13 +1577,26 @@ export async function POST(req: NextRequest) {
         const errStr = String(err);
         const isTimeout = errStr.includes("TimeoutError") || errStr.includes("timeout") || errStr.includes("AbortError");
         lastError = `${provider}/${actualModelId}: ${errStr}`;
+        lastProvider = provider;
+        lastModelId = actualModelId;
+        const streakCd = await recordFailStreak(dbModelId);
+        const streakMin = Math.max(1, Math.round(streakCd / 60_000));
         if (isTimeout) {
-          console.log(`[TIMEOUT-ATTEMPT] ${provider}/${actualModelId} exceeded per-attempt timeout — applying 5min cooldown`);
-          await logCooldown(dbModelId, `attempt timeout: ${errStr.slice(0, 100)}`, 0, 5);
+          console.log(`[TIMEOUT-ATTEMPT:${_reqId}] ${provider}/${actualModelId} timeout → ${streakMin}min`);
+          await logCooldown(dbModelId, `timeout: ${errStr.slice(0, 100)}`, 0, streakMin);
         } else {
-          await logCooldown(dbModelId, lastError);
+          await logCooldown(dbModelId, lastError, 0, streakMin);
         }
-        await recordRoutingResult(dbModelId, provider, promptCategory, false, Date.now() - startTime);
+        const catchLatency = Date.now() - startTime;
+        await recordRoutingResult(dbModelId, provider, promptCategory, false, catchLatency);
+        recordOutcome(provider, actualModelId, false, catchLatency);
+        recordOutcomeLearning({
+          modelId: dbModelId, provider,
+          tokens: estInputTokens, latencyMs: catchLatency, success: false,
+          hasTools: caps.hasTools, hasImages: caps.hasImages,
+          userMessage: extractUserMessage(body) ?? "",
+          failReason: errStr.slice(0, 200),
+        }).catch(() => {});
         await recordProviderFailureMem(provider);
         await recordCircuitFailure(provider);
         if (wasProbing) await recordCircuitProbeResult(provider, false);
@@ -1369,10 +1605,66 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Log skip reasons breakdown
+    if (skipReasons.length > 0) {
+      const breakdown: Record<string, number> = {};
+      for (const r of skipReasons) {
+        const reason = r.split(":").pop() ?? "unknown";
+        breakdown[reason] = (breakdown[reason] ?? 0) + 1;
+      }
+      console.log(`[SKIPS:${_reqId}] tried=${triedProviders.size}, skipped=${skipReasons.length} — ${JSON.stringify(breakdown)}`);
+    }
+
+    // ── Second pass: ถ้าไม่มี candidate ไหนได้ลองจริงๆ (ทุกตัวโดน skip) → ลอง skipped candidates แบบ relaxed
+    if (triedProviders.size === 0 && skippedCandidates.length > 0 && Date.now() - startTime < TOTAL_TIMEOUT_MS) {
+      console.log(`[RELAXED-RETRY:${_reqId}] First pass skipped ${skippedCandidates.length} candidates → retrying ignoring soft filters`);
+      for (const candidate of skippedCandidates.slice(0, 5)) {
+        if (Date.now() - startTime > TOTAL_TIMEOUT_MS) break;
+        const { provider, model_id: actualModelId, id: dbModelId } = candidate;
+        // Hard filter เท่านั้น: blocked provider (auth พัง)
+        if (blockedProviders.has(provider)) continue;
+        triedProviders.add(provider);
+        try {
+          const response = await forwardToProvider(provider, actualModelId, body, isStream);
+          if (response.ok) {
+            const streamLatency = Date.now() - startTime;
+            recordOutcome(provider, actualModelId, true, streamLatency);
+            await logGateway(modelField, actualModelId, provider, 200, streamLatency, 0, 0, null, userMsg, "[relaxed-retry]");
+            console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${streamLatency}ms | relaxed retry`);
+            return buildProxiedResponse(response, provider, actualModelId, isStream, estInputTokens);
+          }
+          const errText = await response.text().catch(() => "");
+          lastError = `${provider}/${actualModelId}: HTTP ${response.status}`;
+          lastProvider = provider;
+          lastModelId = actualModelId;
+          const relCd = await recordFailStreak(dbModelId);
+          await logCooldown(dbModelId, `HTTP ${response.status}: ${errText}`, response.status, Math.max(1, Math.round(relCd / 60_000)));
+          recordOutcome(provider, actualModelId, false, Date.now() - startTime);
+        } catch (err) {
+          lastError = `${provider}/${actualModelId}: ${String(err).slice(0, 150)}`;
+          lastProvider = provider;
+          lastModelId = actualModelId;
+          const relCd2 = await recordFailStreak(dbModelId);
+          await logCooldown(dbModelId, lastError, 0, Math.max(1, Math.round(relCd2 / 60_000)));
+          recordOutcome(provider, actualModelId, false, Date.now() - startTime);
+        }
+      }
+    }
+
     const latency = Date.now() - startTime;
-    await logGateway(modelField, null, null, 503, latency, 0, 0, lastError.slice(0, 300), userMsg, null);
+    // ถ้าไม่มี model ไหนได้ลองเลย → ใช้ candidate แรกเป็น placeholder เฉพาะเพื่อ log
+    // *ห้าม* cooldown ใคร — candidate ไม่ได้ผิดอะไร
+    if (!lastProvider && spreadCandidates.length > 0) {
+      lastProvider = spreadCandidates[0].provider;
+      lastModelId = spreadCandidates[0].model_id;
+    }
+    if (!lastError) {
+      const reasonSummary = skipReasons.slice(0, 3).join(", ");
+      lastError = `ไม่มี candidate ผ่าน filter — skipped=${skipReasons.length} (${reasonSummary}${skipReasons.length > 3 ? "..." : ""})`;
+    }
+    await logGateway(modelField, lastModelId, lastProvider, 503, latency, 0, 0, lastError.slice(0, 300), userMsg, null);
     recordBattleEvent("fail").catch(() => { /* cosmetic */ });
-    console.log(`[RES] 503 | ${triedProviders.size} providers tried, ${blockedProviders.size} blocked | ${latency}ms | ${lastError.slice(0, 120)}`);
+    console.log(`[RES:${_reqId}] 503 | ${triedProviders.size} providers tried, ${blockedProviders.size} blocked | ${latency}ms | ${lastError.slice(0, 120)}`);
     return openAIError(503, {
       message: `All ${Math.min(MAX_RETRIES, spreadCandidates.length)} models from ${triedProviders.size} providers failed: ${lastError}`,
     });

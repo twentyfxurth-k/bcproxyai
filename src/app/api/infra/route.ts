@@ -85,6 +85,7 @@ export async function GET() {
   // ── Redis ────────────────────────────────────────────────────────────────────
   let redis = {
     ok: false,
+    engine: "Redis",
     version: "",
     memoryUsedBytes: 0,
     keysTotal: 0,
@@ -105,9 +106,14 @@ export async function GET() {
     const misses = parseInt(info["keyspace_misses"] ?? "0", 10);
     const total = hits + misses;
 
+    const valkeyVersion = info["valkey_version"];
+    const engine = valkeyVersion ? "Valkey" : "Redis";
+    const version = valkeyVersion ?? info["redis_version"] ?? "";
+
     redis = {
       ok: true,
-      version: info["redis_version"] ?? "",
+      engine,
+      version,
       memoryUsedBytes: parseInt(info["used_memory"] ?? "0", 10),
       keysTotal: dbsize,
       uptimeSec: parseInt(info["uptime_in_seconds"] ?? "0", 10),

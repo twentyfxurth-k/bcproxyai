@@ -91,12 +91,7 @@ export async function processComplaint(
       VALUES (${dbModelId}, 'complained', ${'Re-exam failed: ' + error}, ${cooldownUntil}, now())
     `;
 
-    await sql`
-      INSERT INTO benchmark_results (model_id, category, question, answer, score, max_score, reasoning, latency_ms)
-      VALUES (${dbModelId}, 'general', ${'[complaint] ' + question}, ${''},
-        ${0}, ${10}, ${'Complaint re-exam: failed to respond'}, ${latency})
-    `;
-
+    // Note: benchmark_results ตอนนี้เป็น VIEW — บันทึกเป็น exam failure แทน
     return;
   }
 
@@ -127,12 +122,7 @@ export async function processComplaint(
     UPDATE complaints SET status = ${passed ? 'exam_passed' : 'exam_failed'} WHERE id = ${complaintId}
   `;
 
-  // Update benchmark with new score
-  await sql`
-    INSERT INTO benchmark_results (model_id, question, answer, score, max_score, reasoning, latency_ms)
-    VALUES (${dbModelId}, ${'[complaint] ' + question}, ${answer.slice(0, 2000)},
-      ${score}, ${10}, ${'Complaint re-exam: ' + reasoning}, ${latency})
-  `;
+  // Note: benchmark_results = VIEW — complaint result persisted in complaint_exams already
 
   if (passed) {
     // Passed: clear cooldown, model can resume

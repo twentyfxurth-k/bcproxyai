@@ -2,16 +2,6 @@ import { getSqlClient } from "@/lib/db/schema";
 import { getNextApiKey } from "@/lib/api-keys";
 import { PROVIDER_URLS } from "@/lib/providers";
 
-const NON_CHAT_KEYWORDS = [
-  "whisper",
-  "lyria",
-  "orpheus",
-  "prompt-guard",
-  "safeguard",
-  "compound",
-  "allam",
-];
-
 async function logWorker(step: string, message: string, level = "info") {
   try {
     const sql = getSqlClient();
@@ -19,11 +9,6 @@ async function logWorker(step: string, message: string, level = "info") {
   } catch {
     // silent
   }
-}
-
-export function isNonChatModel(modelId: string): boolean {
-  const lower = modelId.toLowerCase();
-  return NON_CHAT_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
 interface DbModel {
@@ -37,7 +22,7 @@ interface DbModel {
 
 export async function pingModel(
   model: DbModel
-): Promise<{ status: string; latency: number; error?: string }> {
+): Promise<{ status: string; latency: number; error?: string; isNonChat?: boolean }> {
   const url = PROVIDER_URLS[model.provider];
   if (!url) return { status: "error", latency: 0, error: "unknown provider" };
 
@@ -76,6 +61,24 @@ export async function pingModel(
     const latency = Date.now() - start;
 
     if (res.ok) {
+      // Detect non-chat models by inspecting response structure.
+      // A real chat model returns choices[0].message.content as a non-empty string.
+      // Audio/TTS/safety models either return different structure or empty content.
+      try {
+        const json = await res.clone().json() as {
+          choices?: Array<{ message?: { content?: string | null } }>;
+          audio?: unknown;
+          object?: string;
+        };
+        const content = json.choices?.[0]?.message?.content;
+        const isChat = typeof content === "string" && content.trim().length > 0;
+        const isAudio = json.audio != null || json.object === "audio";
+        if (!isChat || isAudio) {
+          return { status: "available", latency, isNonChat: true };
+        }
+      } catch {
+        // Can't parse — assume chat model, health check proceeds normally
+      }
       return { status: "available", latency };
     }
 
@@ -283,8 +286,7 @@ export async function checkHealth(): Promise<{
       )
   `;
 
-  // Filter out non-chat models
-  const eligible = models.filter((m) => !isNonChatModel(m.model_id));
+  const eligible = models;
 
   await logWorker("health", `Checking ${eligible.length} eligible models`);
 
@@ -301,13 +303,24 @@ export async function checkHealth(): Promise<{
     checked++;
 
     let cooldownUntil: string | null = null;
+
+    // Auto-detect non-chat models (audio, TTS, safety classifiers, etc.)
+    // by checking that the response has a real text content in choices[0].message.content
+    if (result.status === "available" && result.isNonChat) {
+      await sql`UPDATE models SET supports_audio_output = 1 WHERE id = ${model.id}`;
+      await logWorker("health", `🔇 ${model.model_id} — ตรวจพบว่าไม่ใช่ chat model → ตั้ง supports_audio_output=1`, "warn");
+      cooldownCount++;
+      return; // skip health_log insert — gateway filters by supports_audio_output
+    }
+
     if (result.status === "quota_exhausted") {
       // Quota หมด → cooldown 24 ชม.
       cooldownUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       cooldownCount++;
     } else if (result.status === "rate_limited" || result.status === "error") {
-      // cooldown_until = now + 2 hours
-      cooldownUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+      // ping fail → cooldown แค่ 5 นาที (worker จะ re-check รอบถัดไป)
+      // เดิม 2 ชม. ทำให้ pool หาย → 503 cascade
+      cooldownUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
       cooldownCount++;
     } else {
       available++;

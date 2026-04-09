@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSqlClient } from "@/lib/db/schema";
 import { PROVIDER_URLS } from "@/lib/providers";
+import { getAllProviderToggles } from "@/lib/provider-toggle";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,7 @@ export async function GET() {
       for (const r of keyRows) dbKeys.set(r.provider, r.api_key);
     } catch { /* table may not exist yet */ }
 
+    const toggleMap = await getAllProviderToggles();
     const ALL_PROVIDERS = Object.keys(PROVIDER_URLS);
     const providers = ALL_PROVIDERS.map(provider => {
       const envVar = ENV_MAP[provider] ?? "";
@@ -69,8 +71,12 @@ export async function GET() {
       const modelCount = Number(dbRow?.model_count ?? 0);
       const availableCount = Number(dbRow?.available_count ?? 0);
 
-      let status: "active" | "no_key" | "no_models" | "error";
-      if (!hasKey || isPlaceholder) {
+      const enabled = toggleMap[provider] ?? true;
+
+      let status: "active" | "no_key" | "no_models" | "error" | "disabled";
+      if (!enabled) {
+        status = "disabled";
+      } else if (!hasKey || isPlaceholder) {
         status = "no_key";
       } else if (modelCount === 0) {
         status = "no_models";
@@ -86,6 +92,7 @@ export async function GET() {
         hasKey: hasKey && !isPlaceholder,
         hasDbKey,
         noKeyRequired,
+        enabled,
         modelCount,
         availableCount,
         status,

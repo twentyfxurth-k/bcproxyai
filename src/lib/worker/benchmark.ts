@@ -188,8 +188,8 @@ export async function askModel(
 export async function judgeAnswer(
   q: BenchmarkQuestion,
   answer: string
-): Promise<{ score: number; reasoning: string }> {
-  if (!answer) return { score: 0, reasoning: "No answer provided" };
+): Promise<{ score: number; reasoning: string; judgeModel: string }> {
+  if (!answer) return { score: 0, reasoning: "No answer provided", judgeModel: "heuristic" };
 
   const prompt = `ให้คะแนน 0-10 คำตอบนี้:
 หมวด: ${q.category}
@@ -225,7 +225,7 @@ export async function judgeAnswer(
           const parsed = JSON.parse(match[0]);
           const score = Math.min(10, Math.max(0, Number(parsed.score) || 0));
           const reasoning = String(parsed.reasoning ?? "").slice(0, 500);
-          return { score, reasoning: `[DeepSeek] ${reasoning}` };
+          return { score, reasoning: `[DeepSeek] ${reasoning}`, judgeModel: DEEPSEEK_MODEL };
         }
       }
     } catch {
@@ -259,7 +259,7 @@ export async function judgeAnswer(
       const parsed = JSON.parse(match[0]);
       const score = Math.min(10, Math.max(0, Number(parsed.score) || 0));
       const reasoning = String(parsed.reasoning ?? "").slice(0, 500);
-      return { score, reasoning };
+      return { score, reasoning, judgeModel };
     } catch {
       continue;
     }
@@ -270,6 +270,7 @@ export async function judgeAnswer(
   return {
     score: hasContent ? 5 : 0,
     reasoning: "Judge unavailable, heuristic score applied",
+    judgeModel: "heuristic",
   };
 }
 
@@ -310,6 +311,7 @@ export async function runBenchmarks(): Promise<{
 
   let totalQuestions = 0;
   let testedModels = 0;
+  let lastJudgeModel = DEEPSEEK_API_KEY ? DEEPSEEK_MODEL : FALLBACK_JUDGE_MODELS[0];
 
   const CONCURRENCY = 20;
   let idx = 0;
@@ -372,7 +374,8 @@ export async function runBenchmarks(): Promise<{
           );
         }
 
-        const { score, reasoning } = await judgeAnswer(q, answer);
+        const { score, reasoning, judgeModel: jm } = await judgeAnswer(q, answer);
+        if (jm !== "heuristic") lastJudgeModel = jm;
 
         // Vision-specific: if model says it can't see the image, force score = 0
         if (q.type === "vision" && answer) {
@@ -468,6 +471,14 @@ export async function runBenchmarks(): Promise<{
 
   const msg = `Benchmark เสร็จ: ทดสอบ ${testedModels} โมเดล, ${totalQuestions} คำถาม (8 หมวด)`;
   await logWorker("benchmark", msg);
+
+  // Save judge model used in this run to worker_state
+  try {
+    await sql`
+      INSERT INTO worker_state (key, value) VALUES ('judge_model', ${lastJudgeModel})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `;
+  } catch { /* silent */ }
 
   return { tested: testedModels, questions: totalQuestions };
 }

@@ -105,6 +105,22 @@ export function markKeyCooldown(provider: string, key: string, durationMs = 3000
 }
 
 /**
+ * ตรวจสอบว่า provider มี API key พร้อมใช้งานหรือไม่
+ * ใช้เพื่อกรอง provider/model ที่ใช้งานไม่ได้ออกจากระบบ
+ */
+export function hasProviderKey(provider: string): boolean {
+  if (provider === "ollama") return true; // Ollama local ไม่ต้อง key
+  return getNextApiKey(provider).length > 0;
+}
+
+/**
+ * คืนรายชื่อ provider ที่มี key ใช้งานได้
+ */
+export function getAvailableProviders(): string[] {
+  return Object.keys(ENV_MAP).filter(hasProviderKey);
+}
+
+/**
  * Get all keys for a provider as a record (for health/benchmark that read at module level).
  * Returns the first available key per provider.
  */

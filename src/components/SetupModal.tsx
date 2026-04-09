@@ -38,9 +38,10 @@ interface ProviderStatus {
   hasKey: boolean;
   hasDbKey: boolean;
   noKeyRequired: boolean;
+  enabled: boolean;
   modelCount: number;
   availableCount: number;
-  status: "active" | "no_key" | "no_models" | "error";
+  status: "active" | "no_key" | "no_models" | "error" | "disabled";
 }
 
 interface SetupModalProps {
@@ -99,6 +100,21 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
     }
   };
 
+  const handleToggleEnabled = async (provider: string, enabled: boolean) => {
+    setSaving((p) => ({ ...p, [provider]: true }));
+    try {
+      await fetch("/api/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, enabled }),
+      });
+      fetchStatuses();
+    } catch { /* ignore */ }
+    finally {
+      setSaving((p) => ({ ...p, [provider]: false }));
+    }
+  };
+
   const handleDeleteKey = async (provider: string) => {
     setSaving((p) => ({ ...p, [provider]: true }));
     try {
@@ -132,6 +148,7 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
 
   const statusMap = new Map(statuses.map((s) => [s.provider, s]));
   const activeCount = statuses.filter((s) => s.status === "active").length;
+  const disabledCount = statuses.filter((s) => s.status === "disabled").length;
   const noKeyCount = statuses.filter((s) => s.status === "no_key").length;
   const hasSavedAny = Object.values(saveResult).some((v) => v === "ok");
 
@@ -158,6 +175,7 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
           <div className="flex items-center gap-4">
             <div className="text-right text-xs">
               <div className="text-emerald-400 font-bold">{activeCount} ใช้ได้</div>
+              {disabledCount > 0 && <div className="text-gray-400">{disabledCount} ปิดเอง</div>}
               <div className="text-amber-400">{noKeyCount} ยังไม่มี key</div>
             </div>
             <button
@@ -211,8 +229,12 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
               const isSaving = saving[info.provider] ?? false;
               const result = saveResult[info.provider];
 
+              const isEnabled = st?.enabled ?? true;
               let statusBadge: { text: string; cls: string };
               switch (st?.status) {
+                case "disabled":
+                  statusBadge = { text: "ปิดใช้งานเอง", cls: "bg-gray-500/20 text-gray-400 border-gray-500/30" };
+                  break;
                 case "active":
                   statusBadge = { text: `${st.availableCount}/${st.modelCount} models`, cls: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" };
                   break;
@@ -230,6 +252,7 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
                 <div
                   key={info.provider}
                   className={`glass rounded-xl p-4 border transition-all ${
+                    !isEnabled ? "border-gray-600/20 bg-gray-800/20 opacity-60" :
                     isActive ? "border-emerald-500/20 bg-emerald-500/[0.02]" :
                     st?.status === "error" ? "border-red-500/10 bg-red-500/[0.02]" :
                     "border-white/5 hover:border-white/10"
@@ -257,6 +280,22 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
                             บันทึกแล้ว!
                           </span>
                         )}
+                        {/* Toggle switch */}
+                        <button
+                          onClick={() => handleToggleEnabled(info.provider, !isEnabled)}
+                          disabled={isSaving}
+                          title={isEnabled ? "คลิกเพื่อปิด provider" : "คลิกเพื่อเปิด provider"}
+                          className={`ml-auto relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 ${
+                            isEnabled ? "bg-emerald-500/70" : "bg-gray-600/60"
+                          }`}
+                        >
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            isEnabled ? "translate-x-4" : "translate-x-0.5"
+                          }`} />
+                        </button>
+                        <span className={`text-[10px] font-bold ${isEnabled ? "text-emerald-400" : "text-gray-500"}`}>
+                          {isEnabled ? "เปิด" : "ปิด"}
+                        </span>
                       </div>
                       <p className="text-xs text-gray-500 mb-2">{info.description}</p>
 

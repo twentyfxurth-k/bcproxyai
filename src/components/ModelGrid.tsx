@@ -125,11 +125,25 @@ export function ModelGrid({ sortedModels, availableCount, cooldownCount, unknown
                   )}
                 </div>
 
-                {/* Fun status line */}
+                {/* Fun status line + benchmark score */}
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-gray-500">
                     {funStatus.emoji} {funStatus.text}
                   </span>
+                  {model.benchmark ? (
+                    <span
+                      className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                        model.benchmark.avgScore >= 8 ? "bg-emerald-500/20 text-emerald-300" :
+                        model.benchmark.avgScore >= 5 ? "bg-amber-500/20 text-amber-300" :
+                        "bg-red-500/20 text-red-300"
+                      }`}
+                      title={`${model.benchmark.questionsAnswered}/${model.benchmark.totalQuestions} ข้อ`}
+                    >
+                      ★ {model.benchmark.avgScore.toFixed(1)}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-gray-700">ยังไม่ได้สอบ</span>
+                  )}
                 </div>
 
                 {/* Cooldown */}

@@ -30,6 +30,7 @@ interface InfraData {
   };
   redis: {
     ok: boolean;
+    engine: string;
     version: string;
     memoryUsedBytes: number;
     keysTotal: number;
@@ -141,11 +142,11 @@ function PostgresCard({ d }: { d: InfraData["postgres"] }) {
         <>
           <div className="text-xs text-gray-400">{d.version}</div>
           <div className="text-xs text-gray-300">
-            DB: <span className="text-indigo-300 font-medium">{fmtBytes(d.dbSizeBytes)}</span>
+            ขนาด DB: <span className="text-indigo-300 font-medium">{fmtBytes(d.dbSizeBytes)}</span>
           </div>
           <div className="space-y-1">
             <div className="flex justify-between text-xs text-gray-400">
-              <span>Connections</span>
+              <span>การเชื่อมต่อ</span>
               <span className={connPct > 80 ? "text-red-300" : "text-gray-300"}>
                 {d.connections}/{d.maxConnections}
               </span>
@@ -154,7 +155,7 @@ function PostgresCard({ d }: { d: InfraData["postgres"] }) {
           </div>
           {d.slowQueries > 0 && (
             <div className="text-xs text-red-400 font-medium">
-              ⚠️ slow queries: {d.slowQueries}
+              ⚠️ query ช้า: {d.slowQueries} รายการ
             </div>
           )}
         </>
@@ -165,26 +166,27 @@ function PostgresCard({ d }: { d: InfraData["postgres"] }) {
   );
 }
 
-// ── Redis card ────────────────────────────────────────────────────────────────
+// ── Redis/Valkey card ─────────────────────────────────────────────────────────
 function RedisCard({ d }: { d: InfraData["redis"] }) {
+  const isValkey = d.engine === "Valkey";
   return (
     <CardShell accent="red">
       <div className="flex items-center gap-2">
-        <span className="text-xl">🔴</span>
-        <span className="font-bold text-white text-sm">Redis</span>
+        <span className="text-xl">{isValkey ? "🔷" : "🔴"}</span>
+        <span className="font-bold text-white text-sm">{d.engine ?? "Redis"}</span>
         <StatusDot ok={d.ok} />
       </div>
       {d.ok ? (
         <>
-          <div className="text-xs text-gray-400">v{d.version} · up {fmtUptime(d.uptimeSec)}</div>
+          <div className="text-xs text-gray-400">v{d.version} · ทำงานมา {fmtUptime(d.uptimeSec)}</div>
           <div className="text-xs text-gray-300">
-            Mem: <span className="text-red-300 font-medium">{fmtBytes(d.memoryUsedBytes)}</span>
+            หน่วยความจำ: <span className="text-red-300 font-medium">{fmtBytes(d.memoryUsedBytes)}</span>
             <span className="text-gray-500 mx-1">·</span>
             Keys: <span className="text-red-300 font-medium">{d.keysTotal.toLocaleString()}</span>
           </div>
           <div className="space-y-1">
             <div className="flex justify-between text-xs text-gray-400">
-              <span>Hit Rate</span>
+              <span>อัตราการ cache hit</span>
               <span className={d.hitRatePct >= 80 ? "text-emerald-300" : "text-amber-300"}>
                 {d.hitRatePct}%
               </span>
@@ -208,13 +210,13 @@ function ReplicasCard({ d, leader }: { d: InfraData["replicas"]; leader: string 
     <CardShell accent="cyan">
       <div className="flex items-center gap-2">
         <span className="text-xl">🔄</span>
-        <span className="font-bold text-white text-sm">Replicas</span>
+        <span className="font-bold text-white text-sm">เซิร์ฟเวอร์</span>
       </div>
       <div className="text-3xl font-black text-cyan-300 leading-none">{d.count}</div>
       {d.count === 1 ? (
-        <div className="text-xs text-gray-500">single instance</div>
+        <div className="text-xs text-gray-500">instance เดียว</div>
       ) : (
-        <div className="text-xs text-gray-500">{d.count} active containers</div>
+        <div className="text-xs text-gray-500">{d.count} containers กำลังทำงาน</div>
       )}
       <div className="flex flex-col gap-1 mt-1">
         {d.instances.slice(0, 5).map((r) => (
@@ -239,10 +241,10 @@ function RateLimitCard({ d }: { d: InfraData["rateLimit"] }) {
     <CardShell accent="amber">
       <div className="flex items-center gap-2">
         <span className="text-xl">🛡️</span>
-        <span className="font-bold text-white text-sm">Rate Limit</span>
+        <span className="font-bold text-white text-sm">จำกัดคำขอ</span>
       </div>
       <div className="text-3xl font-black text-amber-300 leading-none">{d.activeClients}</div>
-      <div className="text-xs text-gray-500">active IP buckets</div>
+      <div className="text-xs text-gray-500">IP ที่กำลังถูก track</div>
       {d.activeClients === 0 ? (
         <div className="text-xs text-emerald-400">ไม่มีการ throttle ตอนนี้</div>
       ) : (
@@ -333,10 +335,10 @@ function FailureStreaksCard({ d }: { d: InfraData["failureStreaks"] }) {
     <CardShell accent="red">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-lg">📉</span>
-        <span className="font-bold text-white text-sm">Failure Streaks</span>
+        <span className="font-bold text-white text-sm">ความล้มเหลวต่อเนื่อง</span>
       </div>
       {d.length === 0 ? (
-        <div className="text-sm text-emerald-400 py-2">ไม่มี provider กำลังมีปัญหา</div>
+        <div className="text-sm text-emerald-400 py-2">ทุก provider ทำงานปกติ</div>
       ) : (
         <div className="flex flex-wrap gap-2 pt-1">
           {d.map((s) => (
@@ -372,7 +374,7 @@ function K6Card({ d }: { d: InfraData["k6"] }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-lg">🧪</span>
-          <span className="font-bold text-white">Load Tests</span>
+          <span className="font-bold text-white">ทดสอบโหลด</span>
         </div>
         <span
           className={`h-2 w-2 rounded-full ${
@@ -385,7 +387,7 @@ function K6Card({ d }: { d: InfraData["k6"] }) {
         {ranCount}
         <span className="text-sm text-gray-500 font-normal">/{scriptsCount}</span>
       </div>
-      <div className="text-[10px] text-gray-500">scripts run / available</div>
+      <div className="text-[10px] text-gray-500">สคริปต์ที่รันแล้ว / ทั้งหมด</div>
 
       {latest ? (
         <div className="mt-2 text-xs space-y-0.5">
@@ -413,7 +415,7 @@ function K6Card({ d }: { d: InfraData["k6"] }) {
         </div>
       ) : (
         <div className="mt-2 text-[10px] text-gray-600">
-          รัน <code className="text-cyan-400">npm run loadtest:smoke</code> เพื่อเริ่ม
+          รัน <code className="text-cyan-400">npm run loadtest:smoke</code> เพื่อเริ่มทดสอบ
         </div>
       )}
     </CardShell>

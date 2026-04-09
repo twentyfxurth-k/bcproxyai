@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSqlClient } from "@/lib/db/schema";
+import { setProviderEnabled, getAllProviderToggles } from "@/lib/provider-toggle";
 
 export const dynamic = "force-dynamic";
 
@@ -32,10 +33,16 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { provider, apiKey } = body as { provider: string; apiKey: string };
+    const { provider, apiKey, enabled } = body as { provider: string; apiKey?: string; enabled?: boolean };
 
     if (!provider || !VALID_PROVIDERS.has(provider)) {
       return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
+    }
+
+    // Toggle เปิด/ปิด provider (ไม่ต้องส่ง apiKey)
+    if (typeof enabled === "boolean") {
+      await setProviderEnabled(provider, enabled);
+      return NextResponse.json({ ok: true, action: enabled ? "enabled" : "disabled" });
     }
 
     const sql = getSqlClient();
@@ -55,6 +62,16 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[setup] POST error:", err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  }
+}
+
+// คืน toggle map สำหรับ UI
+export async function PATCH() {
+  try {
+    const toggles = await getAllProviderToggles();
+    return NextResponse.json({ toggles });
+  } catch {
+    return NextResponse.json({ toggles: {} });
   }
 }
 
