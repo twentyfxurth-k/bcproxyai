@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     const modelList = [...models];
 
     // If specific model requested, try to find it
-    if (modelField !== "auto" && modelField !== "bcproxy/auto") {
+    if (modelField !== "auto" && modelField !== "sml/auto") {
       const specific = await sql<{ id: string; provider: string; model_id: string }[]>`
         SELECT id, provider, model_id FROM models
         WHERE id = ${modelField} OR model_id = ${modelField}
@@ -75,8 +75,8 @@ export async function POST(req: NextRequest) {
           "Authorization": `Bearer ${apiKey}`,
         };
         if (model.provider === "openrouter") {
-          headers["HTTP-Referer"] = "https://bcproxy.ai";
-          headers["X-Title"] = "BCProxyAI Gateway";
+          headers["HTTP-Referer"] = "https://smlgateway.ai";
+          headers["X-Title"] = "SMLGateway Gateway";
         }
 
         const response = await fetch(url, {
@@ -88,8 +88,8 @@ export async function POST(req: NextRequest) {
         if (response.ok) {
           const respHeaders = new Headers();
           respHeaders.set("Content-Type", response.headers.get("Content-Type") || "application/json");
-          respHeaders.set("X-BCProxy-Provider", model.provider);
-          respHeaders.set("X-BCProxy-Model", model.model_id);
+          respHeaders.set("X-SMLGateway-Provider", model.provider);
+          respHeaders.set("X-SMLGateway-Model", model.model_id);
           respHeaders.set("Access-Control-Allow-Origin", "*");
 
           if (isStream && response.body) {
@@ -157,8 +157,8 @@ export async function POST(req: NextRequest) {
     const responseHeaders = new Headers();
     responseHeaders.set("Content-Type", "application/json");
     responseHeaders.set("Access-Control-Allow-Origin", "*");
-    if (chatResponse.headers.get("X-BCProxy-Provider")) {
-      responseHeaders.set("X-BCProxy-Provider", chatResponse.headers.get("X-BCProxy-Provider")!);
+    if (chatResponse.headers.get("X-SMLGateway-Provider")) {
+      responseHeaders.set("X-SMLGateway-Provider", chatResponse.headers.get("X-SMLGateway-Provider")!);
     }
 
     return new Response(JSON.stringify(completionResponse), { status: 200, headers: responseHeaders });

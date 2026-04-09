@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       const apiKey = getNextApiKey(provider);
       if (!apiKey && provider !== "ollama") continue;
 
-      const embeddingModel = requestedModel === "auto" || requestedModel === "bcproxy/auto"
+      const embeddingModel = requestedModel === "auto" || requestedModel === "sml/auto"
         ? DEFAULT_EMBEDDING_MODELS[provider]
         : requestedModel;
 
@@ -49,8 +49,8 @@ export async function POST(req: NextRequest) {
           headers["Authorization"] = `Bearer ${apiKey}`;
         }
         if (provider === "openrouter") {
-          headers["HTTP-Referer"] = "https://bcproxy.ai";
-          headers["X-Title"] = "BCProxyAI Gateway";
+          headers["HTTP-Referer"] = "https://smlgateway.ai";
+          headers["X-Title"] = "SMLGateway Gateway";
         }
 
         const response = await fetch(url, {
@@ -79,8 +79,8 @@ export async function POST(req: NextRequest) {
 
           const respHeaders = new Headers();
           respHeaders.set("Content-Type", "application/json");
-          respHeaders.set("X-BCProxy-Provider", provider);
-          respHeaders.set("X-BCProxy-Model", embeddingModel ?? "");
+          respHeaders.set("X-SMLGateway-Provider", provider);
+          respHeaders.set("X-SMLGateway-Model", embeddingModel ?? "");
           respHeaders.set("Access-Control-Allow-Origin", "*");
 
           return new Response(JSON.stringify(json), { status: 200, headers: respHeaders });

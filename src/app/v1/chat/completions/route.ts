@@ -432,11 +432,12 @@ function parseModelField(model: string): {
   provider?: string;
   modelId?: string;
 } {
-  if (!model || model === "auto" || model === "bcproxy/auto") return { mode: "auto" };
-  if (model === "bcproxy/fast") return { mode: "fast" };
-  if (model === "bcproxy/tools") return { mode: "tools" };
-  if (model === "bcproxy/thai") return { mode: "thai" };
-  if (model === "bcproxy/consensus") return { mode: "consensus" };
+  // SML Gateway modes
+  if (!model || model === "auto" || model === "sml/auto") return { mode: "auto" };
+  if (model === "sml/fast") return { mode: "fast" };
+  if (model === "sml/tools") return { mode: "tools" };
+  if (model === "sml/thai") return { mode: "thai" };
+  if (model === "sml/consensus") return { mode: "consensus" };
 
   const providerMatch = model.match(/^(openrouter|kilo|google|groq|cerebras|sambanova|mistral|ollama|github|fireworks|cohere|cloudflare|huggingface|nvidia|chutes|llm7|scaleway|pollinations|ollamacloud|siliconflow|glhf|together|hyperbolic|zai|dashscope|reka)\/(.+)$/);
   if (providerMatch) return { mode: "direct", provider: providerMatch[1], modelId: providerMatch[2] };
@@ -546,8 +547,8 @@ async function forwardToProvider(
   };
 
   if (provider === "openrouter") {
-    headers["HTTP-Referer"] = "https://bcproxy.ai";
-    headers["X-Title"] = "BCProxyAI Gateway";
+    headers["HTTP-Referer"] = "https://smlgateway.ai";
+    headers["X-Title"] = "SMLGateway Gateway";
   }
 
   const requestBody: Record<string, unknown> = { ...body, model: actualModelId };
@@ -863,9 +864,9 @@ export async function POST(req: NextRequest) {
       console.log(`[CACHE-HIT] ${cachedHit.provider}/${cachedHit.model}`);
       const cacheHeaders = new Headers();
       cacheHeaders.set("Content-Type", "application/json");
-      cacheHeaders.set("X-BCProxy-Provider", cachedHit.provider);
-      cacheHeaders.set("X-BCProxy-Model", cachedHit.model);
-      cacheHeaders.set("X-BCProxy-Cache", "HIT");
+      cacheHeaders.set("X-SMLGateway-Provider", cachedHit.provider);
+      cacheHeaders.set("X-SMLGateway-Model", cachedHit.model);
+      cacheHeaders.set("X-SMLGateway-Cache", "HIT");
       cacheHeaders.set("Access-Control-Allow-Origin", "*");
       const cacheBody = {
         id: `chatcmpl-cache-${Date.now()}`,
@@ -933,16 +934,16 @@ export async function POST(req: NextRequest) {
           }
 
           await logGateway(
-            "bcproxy/consensus", best.model.model_id, best.model.provider, 200, totalLatency,
+            "sml/consensus", best.model.model_id, best.model.provider, 200, totalLatency,
             usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0, null, userMsg,
             `[consensus: ${valid.map((v) => v.model.provider + "/" + v.model.model_id).join(", ")}] ${best.content.slice(0, 300)}`
           );
 
           const headers = new Headers();
           headers.set("Content-Type", "application/json");
-          headers.set("X-BCProxy-Provider", best.model.provider);
-          headers.set("X-BCProxy-Model", best.model.model_id);
-          headers.set("X-BCProxy-Consensus", valid.map((v) => `${v.model.provider}/${v.model.model_id}(${v.content.length}chars/${v.latency}ms)`).join(", "));
+          headers.set("X-SMLGateway-Provider", best.model.provider);
+          headers.set("X-SMLGateway-Model", best.model.model_id);
+          headers.set("X-SMLGateway-Consensus", valid.map((v) => `${v.model.provider}/${v.model.model_id}(${v.content.length}chars/${v.latency}ms)`).join(", "));
           headers.set("Access-Control-Allow-Origin", "*");
           return new Response(JSON.stringify(best.json), { status: 200, headers });
         }
@@ -1252,9 +1253,9 @@ export async function POST(req: NextRequest) {
             }
             const hedgeHeaders = new Headers();
             hedgeHeaders.set("Content-Type", "application/json");
-            hedgeHeaders.set("X-BCProxy-Provider", winner.provider);
-            hedgeHeaders.set("X-BCProxy-Model", winner.model_id);
-            hedgeHeaders.set("X-BCProxy-Hedge", "true");
+            hedgeHeaders.set("X-SMLGateway-Provider", winner.provider);
+            hedgeHeaders.set("X-SMLGateway-Model", winner.model_id);
+            hedgeHeaders.set("X-SMLGateway-Hedge", "true");
             hedgeHeaders.set("Access-Control-Allow-Origin", "*");
             console.log(`[RES:${_reqId}] 200 | ${winner.provider}/${winner.model_id} | ${latency}ms | hedge | "${_reqMsg}"`);
             return new Response(JSON.stringify(json), { status: 200, headers: hedgeHeaders });
@@ -1447,8 +1448,8 @@ export async function POST(req: NextRequest) {
 
               const headers = new Headers();
               headers.set("Content-Type", "application/json");
-              headers.set("X-BCProxy-Provider", provider);
-              headers.set("X-BCProxy-Model", actualModelId);
+              headers.set("X-SMLGateway-Provider", provider);
+              headers.set("X-SMLGateway-Model", actualModelId);
               headers.set("Access-Control-Allow-Origin", "*");
 
               if (json.choices) {
@@ -1683,8 +1684,8 @@ async function buildProxiedResponse(
 ): Promise<Response> {
   const headers = new Headers();
   headers.set("Content-Type", upstream.headers.get("Content-Type") || "application/json");
-  headers.set("X-BCProxy-Provider", provider);
-  headers.set("X-BCProxy-Model", modelId);
+  headers.set("X-SMLGateway-Provider", provider);
+  headers.set("X-SMLGateway-Model", modelId);
   headers.set("Access-Control-Allow-Origin", "*");
 
   if (stream && upstream.body) {

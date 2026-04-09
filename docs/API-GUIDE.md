@@ -1,4 +1,4 @@
-# BCProxyAI — OpenAI-Compatible API Guide
+# SMLGateway — OpenAI-Compatible API Guide
 
 > Drop-in replacement สำหรับ OpenAI API — ใช้กับ app ใดก็ได้ที่รองรับ OpenAI format
 > รวม 13 providers ฟรี, smart routing, auto-retry, fallback อัตโนมัติ
@@ -17,7 +17,7 @@ http://<your-server>:3333/v1
 Authorization: Bearer <any-string>
 ```
 
-BCProxyAI ไม่ตรวจ API key ของ client — ใส่อะไรก็ได้ (หรือไม่ใส่ก็ได้)
+SMLGateway ไม่ตรวจ API key ของ client — ใส่อะไรก็ได้ (หรือไม่ใส่ก็ได้)
 Key ของ provider แต่ละตัวตั้งใน environment หรือ dashboard
 
 ---
@@ -36,7 +36,7 @@ POST /v1/chat/completions
 
 ```jsonc
 {
-  "model": "auto",                    // หรือ "bcproxy/auto", "bcproxy/fast", "bcproxy/tools", "bcproxy/thai"
+  "model": "auto",                    // หรือ "sml/auto", "sml/fast", "sml/tools", "sml/thai"
   "messages": [
     { "role": "system", "content": "You are a helpful assistant." },
     { "role": "user", "content": "สวัสดี" }
@@ -55,10 +55,10 @@ POST /v1/chat/completions
 | Model | พฤติกรรม |
 |-------|---------|
 | `auto` (default) | Smart routing — เลือก model ที่ดีที่สุดตาม request type |
-| `bcproxy/auto` | เหมือน `auto` |
-| `bcproxy/fast` | เลือก model เร็วสุด (cerebras, groq) |
-| `bcproxy/tools` | เลือก model ที่รองรับ function calling + context ใหญ่ |
-| `bcproxy/thai` | เลือก model ที่ถนัดภาษาไทย |
+| `sml/auto` | เหมือน `auto` |
+| `sml/fast` | เลือก model เร็วสุด (cerebras, groq) |
+| `sml/tools` | เลือก model ที่รองรับ function calling + context ใหญ่ |
+| `sml/thai` | เลือก model ที่ถนัดภาษาไทย |
 | `provider/model_id` | ระบุตรง เช่น `mistral/mistral-large-latest` |
 
 #### Vision (ส่งรูป)

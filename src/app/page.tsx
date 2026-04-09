@@ -107,7 +107,7 @@ function GatewayConfigCard() {
           Gateway Config
         </span>
         <p style={{ fontSize: "0.875rem", color: "rgb(156,163,175)", marginTop: "0.25rem" }}>
-          เชื่อมต่อ OpenClaw กับ BCProxyAI — รันคำสั่งนี้ใน OpenClaw:
+          เชื่อมต่อ OpenClaw กับ SMLGateway — รันคำสั่งนี้ใน OpenClaw:
         </p>
       </div>
 
@@ -186,9 +186,9 @@ function GatewayConfigCard() {
         <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
           {[
             { id: "auto",           desc: "เลือกตัวดีสุดอัตโนมัติ" },
-            { id: "bcproxy/fast",   desc: "เร็วที่สุด" },
-            { id: "bcproxy/tools",  desc: "รองรับ tool calling" },
-            { id: "bcproxy/thai",   desc: "เก่งภาษาไทย" },
+            { id: "sml/fast",   desc: "เร็วที่สุด" },
+            { id: "sml/tools",  desc: "รองรับ tool calling" },
+            { id: "sml/thai",   desc: "เก่งภาษาไทย" },
           ].map((m) => (
             <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
               <code style={{ fontSize: "0.75rem", color: "rgb(129,140,248)", fontFamily: "var(--font-geist-mono), monospace", minWidth: "10rem" }}>
@@ -376,7 +376,7 @@ export default function Dashboard() {
               <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center shadow-lg animate-glow-pulse">
                 <span className="text-xs font-black text-white">BC</span>
               </div>
-              <span className="font-bold text-white tracking-tight">BCProxyAI</span>
+              <span className="font-bold text-white tracking-tight">SMLGateway</span>
               <span className="hidden sm:inline text-xs text-gray-500 border border-gray-800 rounded px-2 py-0.5">
                 AI Gateway
               </span>
@@ -404,7 +404,7 @@ export default function Dashboard() {
                 คู่มือ
               </button>
               <a
-                href="https://github.com/jaturapornchai/bcproxyai"
+                href="https://github.com/jaturapornchai/sml-gateway"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
@@ -484,7 +484,7 @@ export default function Dashboard() {
             </div>
             <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight text-white mb-3">
               <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent animate-gradient">
-                BCProxyAI
+                SMLGateway
               </span>
             </h1>
             <p className="text-gray-400 text-lg">โรงเรียน AI — คัดเด็กเก่งฟรีให้ทำงานแทนคุณ 🏫</p>
@@ -601,7 +601,7 @@ export default function Dashboard() {
                   </div>
                 ))}
                 <div className="glass rounded-lg p-3 text-center border border-emerald-500/30 bg-emerald-500/5">
-                  <div className="text-xs text-emerald-400 mb-1">BCProxyAI</div>
+                  <div className="text-xs text-emerald-400 mb-1">SMLGateway</div>
                   <div className="text-lg font-bold text-emerald-300">$0.00</div>
                   <div className="text-xs text-emerald-500">ฟรี!</div>
                   <div className="text-[10px] text-emerald-600 mt-1">$0/$0 /1M</div>
@@ -1166,7 +1166,7 @@ export default function Dashboard() {
 
         {/* ── Footer ──────────────────────────────────────────────────────── */}
         <footer className="text-center text-xs text-gray-700 border-t border-white/5 pt-8 pb-4">
-          BCProxyAI — โรงเรียน AI ที่คัดแต่เด็กเก่ง 🏫 สำหรับ <span className="text-gray-500">OpenClaw</span> และ <span className="text-gray-500">HiClaw</span>
+          SMLGateway — โรงเรียน AI ที่คัดแต่เด็กเก่ง 🏫 สำหรับ <span className="text-gray-500">OpenClaw</span> และ <span className="text-gray-500">HiClaw</span>
         </footer>
 
       </div>

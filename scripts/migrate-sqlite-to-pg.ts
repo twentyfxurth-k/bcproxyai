@@ -9,7 +9,7 @@ import postgres from "postgres";
 import path from "path";
 import fs from "fs";
 
-const SQLITE_PATH = path.resolve(process.cwd(), "data", "bcproxyai.db");
+const SQLITE_PATH = path.resolve(process.cwd(), "data", "sml-gateway.db");
 
 async function main() {
   if (!fs.existsSync(SQLITE_PATH)) {

@@ -20,13 +20,13 @@ interface ModelRow {
   avg_latency: number | null;
 }
 
-// Virtual bcproxy/* models shown at top
+// Virtual sml/* models
 const VIRTUAL_MODELS = [
-  toOpenAIModelObject("bcproxy/auto", "bcproxy"),
-  toOpenAIModelObject("bcproxy/fast", "bcproxy"),
-  toOpenAIModelObject("bcproxy/tools", "bcproxy"),
-  toOpenAIModelObject("bcproxy/thai", "bcproxy"),
-  toOpenAIModelObject("bcproxy/consensus", "bcproxy"),
+  toOpenAIModelObject("sml/auto", "sml"),
+  toOpenAIModelObject("sml/fast", "sml"),
+  toOpenAIModelObject("sml/tools", "sml"),
+  toOpenAIModelObject("sml/thai", "sml"),
+  toOpenAIModelObject("sml/consensus", "sml"),
 ];
 
 export async function GET(_req: NextRequest) {

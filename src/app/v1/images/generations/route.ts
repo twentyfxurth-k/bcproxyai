@@ -71,8 +71,8 @@ export async function POST(req: NextRequest) {
         headers: {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
-          "X-BCProxy-Provider": "pollinations",
-          "X-BCProxy-Model": model,
+          "X-SMLGateway-Provider": "pollinations",
+          "X-SMLGateway-Model": model,
         },
       }
     );

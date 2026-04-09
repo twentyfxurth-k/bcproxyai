@@ -271,8 +271,8 @@ async function askModel(
     Authorization: `Bearer ${apiKey}`,
   };
   if (provider === "openrouter") {
-    headers["HTTP-Referer"] = "https://bcproxyai.app";
-    headers["X-Title"] = "BCProxyAI Exam";
+    headers["HTTP-Referer"] = "https://sml-gateway.app";
+    headers["X-Title"] = "SMLGateway Exam";
   }
 
   const reqBody: Record<string, unknown> = {

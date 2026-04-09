@@ -126,8 +126,8 @@ function buildHeaders(provider: string): Record<string, string> {
     Authorization: `Bearer ${key}`,
   };
   if (provider === "openrouter") {
-    headers["HTTP-Referer"] = "https://bcproxyai.app";
-    headers["X-Title"] = "BCProxyAI";
+    headers["HTTP-Referer"] = "https://sml-gateway.app";
+    headers["X-Title"] = "SMLGateway";
   }
   return headers;
 }

@@ -1,6 +1,6 @@
-# BCProxyAI Load Tests
+# SMLGateway Load Tests
 
-Load testing suite for the BCProxyAI gateway using [k6](https://k6.io/).
+Load testing suite for the SMLGateway gateway using [k6](https://k6.io/).
 
 ## Scripts
 

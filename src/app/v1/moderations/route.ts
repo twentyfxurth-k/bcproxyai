@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 /**
  * POST /v1/moderations — Content moderation
  * Returns a permissive "nothing flagged" response so clients don't block
- * BCProxyAI is a local proxy — user controls their own content
+ * SMLGateway is a local proxy — user controls their own content
  */
 export async function POST(req: NextRequest) {
   try {
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     }));
 
     return new Response(JSON.stringify({
-      id: `modr-bcproxy`,
+      id: `modr-sml`,
       model: "text-moderation-latest",
       results,
     }), {

@@ -99,8 +99,8 @@ function UsageGuide() {
       <div>
         <SectionTitle>ภาพรวมระบบ</SectionTitle>
         <Paragraph>
-          BCProxyAI เป็น <span className="text-white">&quot;ตัวกลาง&quot;</span> ระหว่าง OpenClaw กับผู้ให้บริการ AI ฟรีหลายเจ้า
-          คิดง่ายๆ ว่า: OpenClaw ส่งคำถามมา &rarr; BCProxyAI เลือกโมเดล AI ฟรีตัวที่ดีที่สุดให้ &rarr; ส่งคำตอบกลับ
+          SMLGateway เป็น <span className="text-white">&quot;ตัวกลาง&quot;</span> ระหว่าง OpenClaw กับผู้ให้บริการ AI ฟรีหลายเจ้า
+          คิดง่ายๆ ว่า: OpenClaw ส่งคำถามมา &rarr; SMLGateway เลือกโมเดล AI ฟรีตัวที่ดีที่สุดให้ &rarr; ส่งคำตอบกลับ
         </Paragraph>
         <Paragraph>
           สแกนหาโมเดล AI ฟรีจาก 13 ผู้ให้บริการ (OpenRouter, Kilo, Google, Groq, Cerebras, SambaNova, Mistral, Ollama, GitHub, Fireworks, Cohere, Cloudflare, HuggingFace)
@@ -111,14 +111,14 @@ function UsageGuide() {
       <div>
         <SectionTitle>Virtual Models (โมเดลพิเศษ)</SectionTitle>
         <Paragraph>
-          ไม่ใช่โมเดลจริง แต่เป็น &quot;ชื่อลัด&quot; ที่ BCProxyAI จะเลือกโมเดลจริงให้:
+          ไม่ใช่โมเดลจริง แต่เป็น &quot;ชื่อลัด&quot; ที่ SMLGateway จะเลือกโมเดลจริงให้:
         </Paragraph>
         <table className="w-full">
           <tbody>
             <TableRow label="auto" value="เลือกโมเดลที่ดีที่สุดอัตโนมัติ (แนะนำ)" />
-            <TableRow label="bcproxy/fast" value="เลือกโมเดลที่ตอบเร็วที่สุด (latency ต่ำสุด)" />
-            <TableRow label="bcproxy/tools" value="เลือกโมเดลที่รองรับ tool calling (เรียกฟังก์ชัน)" />
-            <TableRow label="bcproxy/thai" value="เลือกโมเดลที่เก่งภาษาไทย (คะแนนสูงสุด)" />
+            <TableRow label="sml/fast" value="เลือกโมเดลที่ตอบเร็วที่สุด (latency ต่ำสุด)" />
+            <TableRow label="sml/tools" value="เลือกโมเดลที่รองรับ tool calling (เรียกฟังก์ชัน)" />
+            <TableRow label="sml/thai" value="เลือกโมเดลที่เก่งภาษาไทย (คะแนนสูงสุด)" />
           </tbody>
         </table>
       </div>
@@ -193,18 +193,18 @@ function OpenClawGuide() {
     <div className="space-y-6">
       <Info>
         <strong>OpenClaw คืออะไร?</strong> OpenClaw เป็น AI coding assistant ที่ทำงานใน Terminal (หน้าต่างพิมพ์คำสั่ง)
-        ช่วยเขียนโค้ดให้ BCProxyAI ทำให้ OpenClaw ใช้โมเดล AI ฟรีได้โดยไม่ต้องจ่ายเงิน
+        ช่วยเขียนโค้ดให้ SMLGateway ทำให้ OpenClaw ใช้โมเดล AI ฟรีได้โดยไม่ต้องจ่ายเงิน
       </Info>
 
       <div>
         <SectionTitle>วิธีที่ 1: OpenClaw บน Docker</SectionTitle>
         <Info>
           <strong>ทำไมต้อง host.docker.internal?</strong><br />
-          เมื่อ OpenClaw กับ BCProxyAI รันบน Docker คนละ Container (กล่อง) จะเรียก localhost หากันไม่ได้
+          เมื่อ OpenClaw กับ SMLGateway รันบน Docker คนละ Container (กล่อง) จะเรียก localhost หากันไม่ได้
           ต้องใช้ <code className="text-blue-200">host.docker.internal</code> เพื่อให้ Container เข้าถึงเครื่องจริงของคุณ
         </Info>
 
-        <Step num={1} title="onboard OpenClaw ให้ชี้มา BCProxyAI">
+        <Step num={1} title="onboard OpenClaw ให้ชี้มา SMLGateway">
           <Paragraph>เปิด Terminal (หน้าต่างพิมพ์คำสั่ง) แล้ว copy คำสั่งนี้ทั้งหมดวาง:</Paragraph>
           <Code>{`openclaw onboard \\
   --non-interactive \\
@@ -222,8 +222,8 @@ function OpenClawGuide() {
   --skip-ui`}</Code>
           <Expected>{`Onboarding complete!\nProvider: custom-host-docker-internal-3333/auto`}</Expected>
           <Paragraph>
-            <span className="text-gray-500">--custom-api-key dummy</span> = ใส่อะไรก็ได้ เพราะ BCProxyAI ไม่มี authentication<br />
-            <span className="text-gray-500">--custom-model-id auto</span> = ให้ BCProxyAI เลือกโมเดลให้อัตโนมัติ<br />
+            <span className="text-gray-500">--custom-api-key dummy</span> = ใส่อะไรก็ได้ เพราะ SMLGateway ไม่มี authentication<br />
+            <span className="text-gray-500">--custom-model-id auto</span> = ให้ SMLGateway เลือกโมเดลให้อัตโนมัติ<br />
             <span className="text-gray-500">--skip-*</span> = ข้ามขั้นตอนที่ไม่จำเป็นตอน onboard
           </Paragraph>
         </Step>
@@ -326,7 +326,7 @@ openclaw devices approve abc123-def456-...`}</Code>
         <Paragraph>เช็คทีละข้อถ้าเชื่อมต่อไม่ได้:</Paragraph>
         <ul className="list-disc list-inside text-sm text-gray-400 space-y-2 ml-2">
           <li>Docker Desktop เปิดอยู่ไหม? (ไอคอนวาฬสีเขียว)</li>
-          <li>BCProxyAI Docker รันอยู่ไหม? (<code className="text-indigo-300">docker compose up -d</code>)</li>
+          <li>SMLGateway Docker รันอยู่ไหม? (<code className="text-indigo-300">docker compose up -d</code>)</li>
           <li>เปิด <code className="text-indigo-300">http://localhost:3333</code> ได้ไหม? (ต้องเห็น Dashboard)</li>
           <li>Worker สแกนเสร็จไหม? มีโมเดลพร้อมใช้ไหม? (ดูจาก Dashboard)</li>
           <li><code className="text-indigo-300">openclaw onboard</code> เสร็จเรียบร้อยไหม?</li>
@@ -346,7 +346,7 @@ openclaw devices approve abc123-def456-...`}</Code>
         </Paragraph>
         <ul className="list-disc list-inside text-sm text-gray-400 space-y-1 ml-2">
           <li>ตรวจสอบว่า <code className="text-indigo-300">contextWindow</code> ใน openclaw.json เป็น <code className="text-indigo-300">131072</code></li>
-          <li>BCProxyAI จัดการอัตโนมัติ: cooldown โมเดลนั้น 15 นาที แล้ว fallback ไปตัวอื่น</li>
+          <li>SMLGateway จัดการอัตโนมัติ: cooldown โมเดลนั้น 15 นาที แล้ว fallback ไปตัวอื่น</li>
           <li>ระบบ smart selection จะพยายามเลือกโมเดลที่ context window พออยู่แล้ว</li>
         </ul>
       </div>
@@ -399,12 +399,12 @@ function InstallGuide() {
         </Paragraph>
 
         <Warning>
-          Docker Desktop ต้องเปิดค้างไว้ตลอดเวลาที่จะใช้ BCProxyAI ถ้าปิด Docker = BCProxyAI จะหยุดทำงาน
+          Docker Desktop ต้องเปิดค้างไว้ตลอดเวลาที่จะใช้ SMLGateway ถ้าปิด Docker = SMLGateway จะหยุดทำงาน
         </Warning>
       </div>
 
       <div>
-        <SectionTitle>ติดตั้ง BCProxyAI บน Docker</SectionTitle>
+        <SectionTitle>ติดตั้ง SMLGateway บน Docker</SectionTitle>
         <Info>
           <strong>Terminal คืออะไร?</strong> หน้าต่างสำหรับพิมพ์คำสั่ง เปิดได้โดยกด <code className="text-blue-200">Win + R</code> พิมพ์ <code className="text-blue-200">cmd</code> แล้วกด Enter
           หรือค้นหา &quot;Terminal&quot; จาก Start Menu
@@ -412,9 +412,9 @@ function InstallGuide() {
 
         <Step num={1} title="Clone โปรเจค">
           <Paragraph>เปิด Terminal แล้วพิมพ์:</Paragraph>
-          <Code>{`git clone <repository-url> bcproxyai
-cd bcproxyai`}</Code>
-          <Expected>{`Cloning into 'bcproxyai'...\nremote: Enumerating objects: ...\nReceiving objects: 100% ...`}</Expected>
+          <Code>{`git clone <repository-url> sml-gateway
+cd sml-gateway`}</Code>
+          <Expected>{`Cloning into 'sml-gateway'...\nremote: Enumerating objects: ...\nReceiving objects: 100% ...`}</Expected>
         </Step>
 
         <Step num={2} title="สร้างไฟล์ .env.local">
@@ -444,13 +444,13 @@ GOOGLE_AI_API_KEY=`}</Code>
           <Paragraph>
             <code className="text-gray-500">-d</code> = รันเบื้องหลัง (detached) -- Terminal จะกลับมาให้พิมพ์คำสั่งอื่นได้
           </Paragraph>
-          <Expected>{`[+] Running 1/1\n  Container bcproxyai-bcproxyai-1  Started`}</Expected>
+          <Expected>{`[+] Running 1/1\n  Container sml-gateway-sml-gateway-1  Started`}</Expected>
         </Step>
 
         <Step num={5} title="เปิด Dashboard ดู">
           <Paragraph>
             เปิดเบราว์เซอร์ พิมพ์ <code className="text-indigo-300">http://localhost:3333</code> แล้วกด Enter<br />
-            จะเห็น Dashboard ของ BCProxyAI -- Worker จะเริ่มสแกนโมเดลอัตโนมัติทันที
+            จะเห็น Dashboard ของ SMLGateway -- Worker จะเริ่มสแกนโมเดลอัตโนมัติทันที
           </Paragraph>
         </Step>
       </div>
@@ -498,7 +498,7 @@ npm start           # เริ่มรัน`}</Code>
       <div>
         <SectionTitle>Reset ข้อมูลทั้งหมด (เริ่มใหม่)</SectionTitle>
         <Code>{`docker compose down                              # หยุด container
-docker volume rm bcproxyai_bcproxyai-data         # ลบ database
+docker volume rm sml-gateway_sml-gateway-data         # ลบ database
 docker compose up -d                              # เริ่มใหม่`}</Code>
       </div>
     </div>
@@ -512,7 +512,7 @@ function ApiGuide() {
     <div className="space-y-6">
       <div>
         <SectionTitle>Gateway (OpenAI Compatible)</SectionTitle>
-        <Paragraph>BCProxyAI ใช้ API format เดียวกับ OpenAI 100% -- โปรแกรมที่ใช้ OpenAI API ได้อยู่แล้ว สามารถชี้มาที่ BCProxyAI ได้เลย</Paragraph>
+        <Paragraph>SMLGateway ใช้ API format เดียวกับ OpenAI 100% -- โปรแกรมที่ใช้ OpenAI API ได้อยู่แล้ว สามารถชี้มาที่ SMLGateway ได้เลย</Paragraph>
         <table className="w-full mb-4">
           <thead>
             <tr className="border-b border-white/10 text-xs text-gray-500">
@@ -563,7 +563,7 @@ function ApiGuide() {
         <Code>{`curl -X POST http://localhost:3333/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "bcproxy/tools",
+    "model": "sml/tools",
     "messages": [{"role": "user", "content": "วันนี้อากาศเป็นยังไง"}],
     "tools": [{
       "type": "function",
@@ -596,8 +596,8 @@ function ApiGuide() {
         <SectionTitle>Response Headers พิเศษ</SectionTitle>
         <table className="w-full">
           <tbody>
-            <TableRow label="X-BCProxy-Model" value="โมเดลที่ถูกเลือกใช้จริง" />
-            <TableRow label="X-BCProxy-Provider" value="ผู้ให้บริการ (openrouter/kilo/google/groq/cerebras/sambanova/mistral/ollama/...)" />
+            <TableRow label="X-SMLGateway-Model" value="โมเดลที่ถูกเลือกใช้จริง" />
+            <TableRow label="X-SMLGateway-Provider" value="ผู้ให้บริการ (openrouter/kilo/google/groq/cerebras/sambanova/mistral/ollama/...)" />
           </tbody>
         </table>
       </div>
@@ -642,7 +642,7 @@ function AboutGuide() {
       <div>
         <SectionTitle>ระบบ Benchmark ทำงานอย่างไร?</SectionTitle>
         <Paragraph>
-          BCProxyAI มีระบบสอบวัดผลโมเดล AI อัตโนมัติ เพื่อคัดเฉพาะโมเดลที่ตอบภาษาไทยได้ดี
+          SMLGateway มีระบบสอบวัดผลโมเดล AI อัตโนมัติ เพื่อคัดเฉพาะโมเดลที่ตอบภาษาไทยได้ดี
           ใช้ระบบ <span className="text-indigo-300 font-medium">&quot;ให้ AI ตรวจข้อสอบ AI&quot;</span> -- โมเดลหนึ่งตอบคำถาม
           อีกโมเดลหนึ่งเป็นคุณครูตรวจให้คะแนน
         </Paragraph>
@@ -790,7 +790,7 @@ export function GuideModal({ onClose }: { onClose: () => void }) {
               </svg>
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">คู่มือ BCProxyAI</h2>
+              <h2 className="text-lg font-bold text-white">คู่มือ SMLGateway</h2>
               <p className="text-xs text-gray-500">Smart AI Gateway -- คู่มือแบบจับมือทำ</p>
             </div>
           </div>

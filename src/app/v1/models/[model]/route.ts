@@ -4,13 +4,13 @@ import { openAIError, toOpenAIModelObject, unixNow } from "@/lib/openai-compat";
 
 export const dynamic = "force-dynamic";
 
-// Virtual bcproxy/* models
+// Virtual sml/* models
 const VIRTUAL_MODELS: Record<string, { description: string }> = {
-  "bcproxy/auto": { description: "Best available model (highest benchmark score)" },
-  "bcproxy/fast": { description: "Fastest model (lowest latency)" },
-  "bcproxy/tools": { description: "Best model that supports tool calling" },
-  "bcproxy/thai": { description: "Best model for Thai language" },
-  "bcproxy/consensus": { description: "Send to 3 models, pick best answer" },
+  "sml/auto": { description: "Best available model (highest benchmark score)" },
+  "sml/fast": { description: "Fastest model (lowest latency)" },
+  "sml/tools": { description: "Best model that supports tool calling" },
+  "sml/thai": { description: "Best model for Thai language" },
+  "sml/consensus": { description: "Send to 3 models, pick best answer" },
 };
 
 export async function GET(
@@ -24,7 +24,7 @@ export async function GET(
     // Check virtual models
     if (VIRTUAL_MODELS[modelId]) {
       return NextResponse.json(
-        toOpenAIModelObject(modelId, "bcproxy", unixNow()),
+        toOpenAIModelObject(modelId, "sml", unixNow()),
         { headers: { "Access-Control-Allow-Origin": "*" } }
       );
     }

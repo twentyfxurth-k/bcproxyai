@@ -49,8 +49,8 @@ export async function POST(req: NextRequest) {
       headers: {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
-        "X-BCProxy-Provider": "groq",
-        "X-BCProxy-Model": String(formData.get("model")),
+        "X-SMLGateway-Provider": "groq",
+        "X-SMLGateway-Model": String(formData.get("model")),
       },
     });
   } catch (err) {

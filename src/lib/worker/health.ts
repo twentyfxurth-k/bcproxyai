@@ -32,8 +32,8 @@ export async function pingModel(
     Authorization: `Bearer ${key}`,
   };
   if (model.provider === "openrouter") {
-    headers["HTTP-Referer"] = "https://bcproxyai.app";
-    headers["X-Title"] = "BCProxyAI";
+    headers["HTTP-Referer"] = "https://sml-gateway.app";
+    headers["X-Title"] = "SMLGateway";
   }
 
   const body = JSON.stringify({
@@ -131,8 +131,8 @@ export async function testVisionSupport(
     Authorization: `Bearer ${key}`,
   };
   if (model.provider === "openrouter") {
-    headers["HTTP-Referer"] = "https://bcproxyai.app";
-    headers["X-Title"] = "BCProxyAI";
+    headers["HTTP-Referer"] = "https://sml-gateway.app";
+    headers["X-Title"] = "SMLGateway";
   }
 
   const body = JSON.stringify({
@@ -197,8 +197,8 @@ export async function testToolSupport(
     Authorization: `Bearer ${key}`,
   };
   if (model.provider === "openrouter") {
-    headers["HTTP-Referer"] = "https://bcproxyai.app";
-    headers["X-Title"] = "BCProxyAI";
+    headers["HTTP-Referer"] = "https://sml-gateway.app";
+    headers["X-Title"] = "SMLGateway";
   }
 
   const body = JSON.stringify({
