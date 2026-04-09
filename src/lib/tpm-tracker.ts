@@ -26,7 +26,19 @@ const PROVIDER_TPM_FALLBACK: Record<string, number> = {
   kilo: 50_000,
   ollama: Infinity,    // local, no limit
   google: 30_000,
-  nvidia: 100_000,  // NVIDIA NIM — generous per-key
+  nvidia: 100_000,
+  chutes: 500_000,
+  llm7: 50_000,
+  scaleway: 500_000,
+  pollinations: 100_000,
+  ollamacloud: 128_000,
+  siliconflow: 50_000,
+  glhf: 500_000,
+  together: 200_000,
+  hyperbolic: 200_000,
+  zai: 500_000,
+  dashscope: 500_000,
+  reka: 200_000,
 };
 
 const WINDOW_MS = 60_000;

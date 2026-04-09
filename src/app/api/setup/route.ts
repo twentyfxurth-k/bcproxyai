@@ -7,6 +7,8 @@ export const dynamic = "force-dynamic";
 const VALID_PROVIDERS = new Set([
   "openrouter", "kilo", "google", "groq", "cerebras", "sambanova",
   "mistral", "ollama", "github", "fireworks", "cohere", "cloudflare", "huggingface", "nvidia",
+  "chutes", "llm7", "scaleway", "pollinations", "ollamacloud", "siliconflow", "glhf",
+  "together", "hyperbolic", "zai", "dashscope", "reka",
 ]);
 
 export async function GET() {

@@ -29,6 +29,18 @@ const PROVIDERS: ProviderInfo[] = [
   { provider: "cloudflare", label: "Cloudflare AI", description: "Workers AI — รัน model บน edge ฟรี", signupUrl: "https://dash.cloudflare.com/profile/api-tokens", envVar: "CLOUDFLARE_API_TOKEN", icon: "\u2601\uFE0F" },
   { provider: "huggingface", label: "HuggingFace", description: "Inference API — model หลากหลายที่สุด", signupUrl: "https://huggingface.co/settings/tokens", envVar: "HF_TOKEN", icon: "\u{1F917}" },
   { provider: "nvidia", label: "NVIDIA NIM", description: "NVIDIA Inference Microservices — Llama, Nemotron, DeepSeek ฟรี (1000 req/month)", signupUrl: "https://build.nvidia.com/", envVar: "NVIDIA_API_KEY", icon: "\u{1F7E2}" },
+  { provider: "chutes", label: "Chutes.ai", description: "Community GPU — DeepSeek R1, Qwen3-235B, Kimi K2 ไม่จำกัดรายเดือน", signupUrl: "https://chutes.ai/", envVar: "CHUTES_API_KEY", icon: "\u{1F4A8}" },
+  { provider: "llm7", label: "LLM7.io", description: "Gateway ฟรี 30 RPM — DeepSeek R1, Qwen2.5 Coder, 27+ models", signupUrl: "https://token.llm7.io/", envVar: "LLM7_API_KEY", icon: "\u{1F511}" },
+  { provider: "scaleway", label: "Scaleway 🇪🇺", description: "EU Generative APIs — 1M tokens ฟรีถาวร (Qwen3, gpt-oss, DeepSeek R1)", signupUrl: "https://console.scaleway.com/generative-api/models", envVar: "SCALEWAY_API_KEY", icon: "\u{1F1EA}\u{1F1FA}" },
+  { provider: "pollinations", label: "Pollinations AI", description: "ฟรีไม่ต้อง key — GPT-5, Claude, Gemini, DeepSeek V3.2 (1 RPH per IP)", signupUrl: "https://enter.pollinations.ai/", envVar: "POLLINATIONS_API_KEY", icon: "\u{1F338}" },
+  { provider: "ollamacloud", label: "Ollama Cloud", description: "Large models 120B+ — gpt-oss, deepseek-v3, qwen3-coder:480b (100 RPH)", signupUrl: "https://ollama.com/cloud", envVar: "OLLAMA_CLOUD_API_KEY", icon: "\u{2601}\uFE0F" },
+  { provider: "siliconflow", label: "SiliconFlow 🇨🇳", description: "Qwen3, DeepSeek R1 distill, GLM-4 — 50 RPD free (1000 RPD ถ้าเติม $1)", signupUrl: "https://siliconflow.com/", envVar: "SILICONFLOW_API_KEY", icon: "\u{1F52E}" },
+  { provider: "glhf", label: "glhf.chat", description: "Beta ฟรี — run ทุก HuggingFace model ที่ vLLM support (Llama 3.3, Qwen Coder)", signupUrl: "https://glhf.chat/", envVar: "GLHF_API_KEY", icon: "\u{1F3AE}" },
+  { provider: "together", label: "Together AI", description: "71 free models — DeepSeek V3.1, Llama 4 Scout, Qwen 2.5, Mixtral ($25 credit)", signupUrl: "https://api.together.xyz/settings/api-keys", envVar: "TOGETHER_API_KEY", icon: "\u{1F91D}" },
+  { provider: "hyperbolic", label: "Hyperbolic", description: "Llama 405B, DeepSeek R1 — $1 signup credit (ใช้ inference ได้)", signupUrl: "https://app.hyperbolic.ai/signup", envVar: "HYPERBOLIC_API_KEY", icon: "\u{1F300}" },
+  { provider: "zai", label: "Z.AI (GLM)", description: "Zhipu GLM-4.5, GLM-4-Flash, GLM-4-Long (1M context) — free signup credits", signupUrl: "https://z.ai/manage-apikey/apikey-list", envVar: "ZAI_API_KEY", icon: "\u{1F5FF}" },
+  { provider: "dashscope", label: "Alibaba Qwen", description: "DashScope — Qwen2.5 72B, Qwen-VL, Coder 32B (1M input + 1M output tokens ฟรี 90 วัน)", signupUrl: "https://bailian.console.alibabacloud.com/", envVar: "DASHSCOPE_API_KEY", icon: "\u{1F9E7}" },
+  { provider: "reka", label: "Reka AI", description: "Reka Flash, Reka Core — $10 ฟรีทุกเดือนแบบอัตโนมัติ (auto-refresh)", signupUrl: "https://platform.reka.ai/", envVar: "REKA_API_KEY", icon: "\u{1F30A}" },
 ];
 
 // ─── Types ───────────────────────────────────────────────────────────────────

@@ -20,9 +20,21 @@ const ENV_MAP: Record<string, string> = {
   cloudflare: "CLOUDFLARE_API_TOKEN",
   huggingface: "HF_TOKEN",
   nvidia: "NVIDIA_API_KEY",
+  chutes: "CHUTES_API_KEY",
+  llm7: "LLM7_API_KEY",
+  scaleway: "SCALEWAY_API_KEY",
+  pollinations: "POLLINATIONS_API_KEY",
+  ollamacloud: "OLLAMA_CLOUD_API_KEY",
+  siliconflow: "SILICONFLOW_API_KEY",
+  glhf: "GLHF_API_KEY",
+  together: "TOGETHER_API_KEY",
+  hyperbolic: "HYPERBOLIC_API_KEY",
+  zai: "ZAI_API_KEY",
+  dashscope: "DASHSCOPE_API_KEY",
+  reka: "REKA_API_KEY",
 };
 
-const NO_KEY_REQUIRED = new Set(["ollama"]);
+const NO_KEY_REQUIRED = new Set(["ollama", "pollinations"]);
 
 export async function GET() {
   try {

@@ -579,6 +579,261 @@ async function fetchNvidiaModels(): Promise<ModelRow[]> {
   }
 }
 
+// ─── Generic OpenAI-compatible fetcher ────────────────────────────────────────
+// ใช้กับ provider ที่ API เป็น standard OpenAI format:
+//   - GET /models → { data: [{ id, context_length? }] }
+//   - POST /chat/completions
+async function fetchGenericOpenAI(opts: {
+  provider: string;
+  envKeyName: string;
+  modelsUrl: string;
+  defaultContext?: number;
+  headers?: Record<string, string>;
+  modelFilter?: (id: string) => boolean;
+  contextOverride?: (id: string, m: Record<string, unknown>) => number | undefined;
+}): Promise<ModelRow[]> {
+  void opts.envKeyName;
+  const apiKey = getNextApiKey(opts.provider);
+  if (!apiKey) return [];
+  try {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${apiKey}`,
+      ...(opts.headers ?? {}),
+    };
+    const res = await fetch(opts.modelsUrl, {
+      headers,
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const list = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+    const models: ModelRow[] = [];
+    for (const m of list) {
+      const mid: string = String(m.id ?? m.name ?? "");
+      if (!mid) continue;
+      if (NON_CHAT_KEYWORDS.some((kw) => mid.toLowerCase().includes(kw))) continue;
+      if (/embed|rerank|ocr|stt|tts|whisper|guard|safety|moderation|transcrib|speech|audio|image[_-]gen|sdxl|flux|dall|lyria/i.test(mid)) continue;
+      if (opts.modelFilter && !opts.modelFilter(mid)) continue;
+      const apiCtx =
+        (m.context_length as number | undefined) ??
+        (m.context_window as number | undefined) ??
+        (m.max_context_length as number | undefined) ??
+        (m.max_input_tokens as number | undefined);
+      const overrideCtx = opts.contextOverride?.(mid, m);
+      const ctx = overrideCtx ?? apiCtx ?? opts.defaultContext ?? 32_768;
+      models.push({
+        id: `${opts.provider}:${mid}`,
+        name: mid.split("/").pop() ?? mid,
+        provider: opts.provider,
+        model_id: mid,
+        context_length: ctx,
+        tier: calcTier(ctx),
+        description: typeof m.description === "string" ? m.description.slice(0, 200) : undefined,
+        supports_vision: detectVision(mid, mid),
+        supports_tools: detectTools(mid, mid),
+      });
+    }
+    return models;
+  } catch (err) {
+    await logWorker("scan", `${opts.provider} fetch error: ${err}`, "error");
+    return [];
+  }
+}
+
+// ─── New providers (12) — all OpenAI-compatible ───────────────────────────────
+
+async function fetchChutesModels(): Promise<ModelRow[]> {
+  return fetchGenericOpenAI({
+    provider: "chutes",
+    envKeyName: "CHUTES_API_KEY",
+    modelsUrl: "https://llm.chutes.ai/v1/models",
+    defaultContext: 32_768,
+  });
+}
+
+async function fetchLlm7Models(): Promise<ModelRow[]> {
+  return fetchGenericOpenAI({
+    provider: "llm7",
+    envKeyName: "LLM7_API_KEY",
+    modelsUrl: "https://api.llm7.io/v1/models",
+    defaultContext: 32_768,
+  });
+}
+
+async function fetchScalewayModels(): Promise<ModelRow[]> {
+  // Scaleway อาจต้องใช้ X-Auth-Token header บาง region — ลอง Bearer ก่อน
+  return fetchGenericOpenAI({
+    provider: "scaleway",
+    envKeyName: "SCALEWAY_API_KEY",
+    modelsUrl: "https://api.scaleway.ai/v1/models",
+    defaultContext: 32_768,
+  });
+}
+
+async function fetchPollinationsModels(): Promise<ModelRow[]> {
+  // Pollinations แยก text models endpoint
+  try {
+    const res = await fetch("https://text.pollinations.ai/models", {
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const list = Array.isArray(json) ? json : [];
+    const models: ModelRow[] = [];
+    for (const m of list) {
+      const mid: string = typeof m === "string" ? m : String(m.name ?? m.id ?? "");
+      if (!mid) continue;
+      if (NON_CHAT_KEYWORDS.some((kw) => mid.toLowerCase().includes(kw))) continue;
+      if (/embed|rerank|image|audio|speech|tts|stt|flux|dall|sdxl/i.test(mid)) continue;
+      const ctx = 32_768;
+      models.push({
+        id: `pollinations:${mid}`,
+        name: mid,
+        provider: "pollinations",
+        model_id: mid,
+        context_length: ctx,
+        tier: calcTier(ctx),
+        description: undefined,
+        supports_vision: detectVision(mid, mid),
+        supports_tools: detectTools(mid, mid),
+      });
+    }
+    return models;
+  } catch (err) {
+    await logWorker("scan", `Pollinations fetch error: ${err}`, "error");
+    return [];
+  }
+}
+
+async function fetchOllamaCloudModels(): Promise<ModelRow[]> {
+  return fetchGenericOpenAI({
+    provider: "ollamacloud",
+    envKeyName: "OLLAMA_CLOUD_API_KEY",
+    modelsUrl: "https://ollama.com/api/tags",
+    defaultContext: 131_072,
+    modelFilter: (id) => id.includes(":") || id.includes("cloud"),
+  });
+}
+
+async function fetchSiliconFlowModels(): Promise<ModelRow[]> {
+  return fetchGenericOpenAI({
+    provider: "siliconflow",
+    envKeyName: "SILICONFLOW_API_KEY",
+    modelsUrl: "https://api.siliconflow.cn/v1/models",
+    defaultContext: 32_768,
+  });
+}
+
+async function fetchGlhfModels(): Promise<ModelRow[]> {
+  // glhf ไม่มี model list endpoint — hardcode curated list
+  const apiKey = getNextApiKey("glhf");
+  if (!apiKey) return [];
+  const curatedModels = [
+    { id: "hf:meta-llama/Llama-3.3-70B-Instruct", ctx: 131_072 },
+    { id: "hf:meta-llama/Meta-Llama-3.1-405B-Instruct", ctx: 131_072 },
+    { id: "hf:meta-llama/Meta-Llama-3.1-70B-Instruct", ctx: 131_072 },
+    { id: "hf:Qwen/Qwen2.5-72B-Instruct", ctx: 131_072 },
+    { id: "hf:Qwen/Qwen2.5-Coder-32B-Instruct", ctx: 131_072 },
+    { id: "hf:Qwen/QwQ-32B-Preview", ctx: 32_768 },
+    { id: "hf:mistralai/Mixtral-8x22B-Instruct-v0.1", ctx: 65_536 },
+    { id: "hf:deepseek-ai/DeepSeek-V3", ctx: 131_072 },
+    { id: "hf:deepseek-ai/DeepSeek-R1", ctx: 131_072 },
+  ];
+  return curatedModels.map((m) => ({
+    id: `glhf:${m.id}`,
+    name: m.id.replace("hf:", "").split("/").pop() ?? m.id,
+    provider: "glhf",
+    model_id: m.id,
+    context_length: m.ctx,
+    tier: calcTier(m.ctx),
+    description: undefined,
+    supports_vision: detectVision(m.id, m.id),
+    supports_tools: detectTools(m.id, m.id),
+  }));
+}
+
+async function fetchTogetherModels(): Promise<ModelRow[]> {
+  return fetchGenericOpenAI({
+    provider: "together",
+    envKeyName: "TOGETHER_API_KEY",
+    modelsUrl: "https://api.together.xyz/v1/models",
+    defaultContext: 32_768,
+    modelFilter: (id) => !/image|video|audio|embed|rerank/i.test(id),
+  });
+}
+
+async function fetchHyperbolicModels(): Promise<ModelRow[]> {
+  return fetchGenericOpenAI({
+    provider: "hyperbolic",
+    envKeyName: "HYPERBOLIC_API_KEY",
+    modelsUrl: "https://api.hyperbolic.xyz/v1/models",
+    defaultContext: 32_768,
+  });
+}
+
+async function fetchZaiModels(): Promise<ModelRow[]> {
+  // Z.AI ไม่มี public model list — curated จาก docs
+  const apiKey = getNextApiKey("zai");
+  if (!apiKey) return [];
+  const curated = [
+    { id: "glm-4.5-flash", ctx: 131_072 },
+    { id: "glm-4-flash", ctx: 131_072 },
+    { id: "glm-4-plus", ctx: 131_072 },
+    { id: "glm-4-air", ctx: 131_072 },
+    { id: "glm-4-long", ctx: 1_000_000 },
+    { id: "glm-4.5", ctx: 131_072 },
+  ];
+  return curated.map((m) => ({
+    id: `zai:${m.id}`,
+    name: m.id,
+    provider: "zai",
+    model_id: m.id,
+    context_length: m.ctx,
+    tier: calcTier(m.ctx),
+    description: undefined,
+    supports_vision: detectVision(m.id, m.id),
+    supports_tools: detectTools(m.id, m.id),
+  }));
+}
+
+async function fetchDashScopeModels(): Promise<ModelRow[]> {
+  // DashScope (Qwen via Alibaba) — curated because model list endpoint is restricted
+  const apiKey = getNextApiKey("dashscope");
+  if (!apiKey) return [];
+  const curated = [
+    { id: "qwen-max", ctx: 32_768 },
+    { id: "qwen-plus", ctx: 131_072 },
+    { id: "qwen-turbo", ctx: 131_072 },
+    { id: "qwen2.5-72b-instruct", ctx: 131_072 },
+    { id: "qwen2.5-32b-instruct", ctx: 131_072 },
+    { id: "qwen2.5-14b-instruct", ctx: 131_072 },
+    { id: "qwen2.5-7b-instruct", ctx: 131_072 },
+    { id: "qwen2.5-coder-32b-instruct", ctx: 131_072 },
+    { id: "qwen-vl-max", ctx: 32_768 },
+    { id: "qwen-vl-plus", ctx: 32_768 },
+  ];
+  return curated.map((m) => ({
+    id: `dashscope:${m.id}`,
+    name: m.id,
+    provider: "dashscope",
+    model_id: m.id,
+    context_length: m.ctx,
+    tier: calcTier(m.ctx),
+    description: undefined,
+    supports_vision: /vl/i.test(m.id) ? 1 : 0,
+    supports_tools: 1,
+  }));
+}
+
+async function fetchRekaModels(): Promise<ModelRow[]> {
+  return fetchGenericOpenAI({
+    provider: "reka",
+    envKeyName: "REKA_API_KEY",
+    modelsUrl: "https://api.reka.ai/v1/models",
+    defaultContext: 128_000,
+  });
+}
+
 async function fetchHuggingFaceModels(): Promise<ModelRow[]> {
   const token = getNextApiKey("huggingface");
   if (!token) return [];
@@ -679,7 +934,14 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     return fn();
   };
 
-  const [orModels, kiloModels, googleModels, groqModels, cerebrasModels, sambaNovaModels, mistralModels, ollamaModels, githubModels, fireworksModels, cohereModels, cloudflareModels, hfModels, nvidiaModels] = await Promise.all([
+  const [
+    orModels, kiloModels, googleModels, groqModels, cerebrasModels, sambaNovaModels,
+    mistralModels, ollamaModels, githubModels, fireworksModels, cohereModels,
+    cloudflareModels, hfModels, nvidiaModels,
+    chutesModels, llm7Models, scalewayModels, pollinationsModels, ollamaCloudModels,
+    siliconflowModels, glhfModels, togetherModels, hyperbolicModels,
+    zaiModels, dashscopeModels, rekaModels,
+  ] = await Promise.all([
     guard("openrouter", fetchOpenRouterModels),
     guard("kilo", fetchKiloModels),
     guard("google", fetchGoogleModels),
@@ -694,9 +956,28 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     guard("cloudflare", fetchCloudflareModels),
     guard("huggingface", fetchHuggingFaceModels),
     guard("nvidia", fetchNvidiaModels),
+    guard("chutes", fetchChutesModels),
+    guard("llm7", fetchLlm7Models),
+    guard("scaleway", fetchScalewayModels),
+    guard("pollinations", fetchPollinationsModels),
+    guard("ollamacloud", fetchOllamaCloudModels),
+    guard("siliconflow", fetchSiliconFlowModels),
+    guard("glhf", fetchGlhfModels),
+    guard("together", fetchTogetherModels),
+    guard("hyperbolic", fetchHyperbolicModels),
+    guard("zai", fetchZaiModels),
+    guard("dashscope", fetchDashScopeModels),
+    guard("reka", fetchRekaModels),
   ]);
 
-  const allModels = [...orModels, ...kiloModels, ...googleModels, ...groqModels, ...cerebrasModels, ...sambaNovaModels, ...mistralModels, ...ollamaModels, ...githubModels, ...fireworksModels, ...cohereModels, ...cloudflareModels, ...hfModels, ...nvidiaModels];
+  const allModels = [
+    ...orModels, ...kiloModels, ...googleModels, ...groqModels, ...cerebrasModels, ...sambaNovaModels,
+    ...mistralModels, ...ollamaModels, ...githubModels, ...fireworksModels, ...cohereModels,
+    ...cloudflareModels, ...hfModels, ...nvidiaModels,
+    ...chutesModels, ...llm7Models, ...scalewayModels, ...pollinationsModels, ...ollamaCloudModels,
+    ...siliconflowModels, ...glhfModels, ...togetherModels, ...hyperbolicModels,
+    ...zaiModels, ...dashscopeModels, ...rekaModels,
+  ];
   const foundIds = new Set(allModels.map(m => m.id));
   let newCount = 0;
 
@@ -791,7 +1072,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     }
   } catch { /* silent */ }
 
-  const msg = `Scan: พบ ${allModels.length} (OR=${orModels.length}, Kilo=${kiloModels.length}, Google=${googleModels.length}, Groq=${groqModels.length}, Cerebras=${cerebrasModels.length}, SN=${sambaNovaModels.length}, Mistral=${mistralModels.length}, Ollama=${ollamaModels.length}, GitHub=${githubModels.length}, FW=${fireworksModels.length}, Cohere=${cohereModels.length}, CF=${cloudflareModels.length}, HF=${hfModels.length}, NVIDIA=${nvidiaModels.length}) | ใหม่ ${newCount} | หายไป ${disappearedCount}`;
+  const msg = `Scan: พบ ${allModels.length} | OR=${orModels.length} Kilo=${kiloModels.length} GG=${googleModels.length} Groq=${groqModels.length} Cer=${cerebrasModels.length} SN=${sambaNovaModels.length} Mis=${mistralModels.length} Oll=${ollamaModels.length} GH=${githubModels.length} FW=${fireworksModels.length} Coh=${cohereModels.length} CF=${cloudflareModels.length} HF=${hfModels.length} NV=${nvidiaModels.length} Ch=${chutesModels.length} L7=${llm7Models.length} Sc=${scalewayModels.length} Pol=${pollinationsModels.length} OC=${ollamaCloudModels.length} SF=${siliconflowModels.length} GLHF=${glhfModels.length} Tg=${togetherModels.length} Hy=${hyperbolicModels.length} Z=${zaiModels.length} DS=${dashscopeModels.length} Reka=${rekaModels.length} | ใหม่ ${newCount} | หายไป ${disappearedCount}`;
   await logWorker("scan", msg);
 
   return { found: allModels.length, new: newCount, disappeared: disappearedCount };
