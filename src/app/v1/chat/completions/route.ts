@@ -505,8 +505,8 @@ async function selectModelsByMode(
         SELECT hl.model_id, hl.status, hl.cooldown_until
         FROM health_logs hl
         INNER JOIN (
-          SELECT model_id, MAX(checked_at) as max_checked FROM health_logs GROUP BY model_id
-        ) latest ON hl.model_id = latest.model_id AND hl.checked_at = latest.max_checked
+          SELECT model_id, MAX(id) as max_id FROM health_logs GROUP BY model_id
+        ) latest ON hl.model_id = latest.model_id AND hl.id = latest.max_id
       ) h ON m.id = h.model_id
       WHERE (h.cooldown_until IS NULL OR h.cooldown_until < now())
         AND COALESCE(m.supports_embedding, 0) != 1
@@ -1167,6 +1167,7 @@ export async function POST(req: NextRequest) {
 
     // ภายในแต่ละ provider เรียง model ตาม live-score + benchmark
     const spreadCandidates: typeof finalCandidates = [];
+    const seenIds = new Set<string>();
     for (const { models } of providerRanking) {
       const sortedModels = [...models].sort((a, b) => {
         const la = getModelScore(a.id);
@@ -1175,7 +1176,9 @@ export async function POST(req: NextRequest) {
         const scoreB = lb.successRate * 10_000 + (b.avg_score ?? 0) * 100 - Math.min(lb.avgLatency, b.avg_latency ?? 9999) / 100;
         return scoreB - scoreA;
       });
-      spreadCandidates.push(...sortedModels);
+      for (const m of sortedModels) {
+        if (!seenIds.has(m.id)) { seenIds.add(m.id); spreadCandidates.push(m); }
+      }
     }
 
     if (process.env.LOG_LEVEL === "debug") console.log(`[DEBUG] spread=${spreadCandidates.length} top5=[${spreadCandidates.slice(0,5).map(c=>c.provider+'/'+c.model_id).join(', ')}]`);

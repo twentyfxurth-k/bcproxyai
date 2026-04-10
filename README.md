@@ -1017,6 +1017,7 @@ powershell -File "C:/Users/jatur/restart-caddy.ps1"
 8. **Hedge race เฉพาะ non-tools** — Tools request ไม่ parallel เพื่อประหยัด quota
 9. **Category boost ก่อน sort** — ผู้ชนะ category ขึ้นบนเสมอ
 10. **Live score in-memory (EMA)** — ไม่ต้องรอ DB round-trip ข้าม request
+11. **Candidate dedup safety** — Set-based dedup ใน spreadCandidates + health subquery ใช้ `MAX(id)` ไม่ใช่ `MAX(checked_at)` ป้องกัน row multiplication
 
 ---
 
