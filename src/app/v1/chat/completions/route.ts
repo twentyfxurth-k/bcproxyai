@@ -819,7 +819,9 @@ export async function POST(req: NextRequest) {
     const _reqId = Math.random().toString(36).slice(2, 8); // short id สำหรับไล่ log
     const _msgCount = Array.isArray(body.messages) ? (body.messages as unknown[]).length : 0;
     const _estTokensInit = estimateTokens(body);
-    console.log(`[REQ:${_reqId}] ${modelField} | stream=${isStream} | img=${caps.hasImages} | tools=${caps.hasTools} | msgs=${_msgCount} | est=${_estTokensInit}tok | "${_reqMsg}"`);
+    const _imgCount = caps.hasImages ? ((body.messages as Array<{content: unknown}>).reduce((n, m) => n + (Array.isArray(m.content) ? (m.content as Array<{type: string}>).filter(p => p.type === "image_url").length : 0), 0)) : 0;
+    const _toolCount = Array.isArray(body.tools) ? (body.tools as unknown[]).length : 0;
+    console.log(`[REQ:${_reqId}] ${modelField} | stream=${isStream} | img=${_imgCount} | tools=${_toolCount} | msgs=${_msgCount} | est=${_estTokensInit}tok | "${_reqMsg}"`);
 
     // Rate limiting — 100 req/60s per IP
     // Caddy sets X-Real-IP and X-Forwarded-For to exactly the true client IP
@@ -892,6 +894,7 @@ export async function POST(req: NextRequest) {
 
     const estInputTokens = estimateTokens(body);
     const promptCategory = detectPromptCategory(extractUserMessage(body) ?? "");
+    console.log(`[CAT:${_reqId}] ${promptCategory}`);
 
     // ---- Consensus mode ----
     if (parsed.mode === "consensus") {
@@ -1290,7 +1293,10 @@ export async function POST(req: NextRequest) {
             hedgeHeaders.set("X-SMLGateway-Model", winner.model_id);
             hedgeHeaders.set("X-SMLGateway-Hedge", "true");
             hedgeHeaders.set("Access-Control-Allow-Origin", "*");
-            console.log(`[RES:${_reqId}] 200 | ${winner.provider}/${winner.model_id} | ${latency}ms | hedge | "${_reqMsg}"`);
+            const _hpt = usage?.prompt_tokens ?? 0; const _hct = usage?.completion_tokens ?? 0;
+            const _htc = Array.isArray(json.choices?.[0]?.message?.tool_calls) ? json.choices[0].message.tool_calls.length : 0;
+            const _hans = content?.slice(0, 80) ?? (_htc > 0 ? `[tool_call×${_htc}]` : "-");
+            console.log(`[RES:${_reqId}] 200 | ${winner.provider}/${winner.model_id} | ${latency}ms | hedge | pt=${_hpt} ct=${_hct} tc=${_htc} | Q:"${_reqMsg}" A:"${_hans}"`);
             return new Response(JSON.stringify(json), { status: 200, headers: hedgeHeaders });
           }
         } catch {
@@ -1505,7 +1511,10 @@ export async function POST(req: NextRequest) {
                 setCachedResponse(body, { content, provider, model: actualModelId }).catch(() => { /* non-critical */ });
               }
               recordBattleEvent(outcomeFromLatency(latency, true)).catch(() => { /* cosmetic */ });
-              console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${latency}ms | "${_reqMsg}"`);
+              const _pt = usage?.prompt_tokens ?? 0; const _ct = usage?.completion_tokens ?? 0;
+              const _tc = hasToolCalls ? (firstMsg!.tool_calls!.length) : 0;
+              const _ans = content?.slice(0, 80) ?? (hasToolCalls ? `[tool_call×${_tc}]` : "-");
+              console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${latency}ms | pt=${_pt} ct=${_ct} tc=${_tc} | Q:"${_reqMsg}" A:"${_ans}"`);
               return new Response(JSON.stringify(json), { status: 200, headers });
             } catch {
               // JSON parse failed — fall through
@@ -1524,7 +1533,7 @@ export async function POST(req: NextRequest) {
           }
           await logGateway(modelField, actualModelId, provider, 200, streamLatency, 0, 0, null, userMsg, "[stream]");
           recordBattleEvent(outcomeFromLatency(streamLatency, true)).catch(() => { /* cosmetic */ });
-          console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${streamLatency}ms | "${_reqMsg}"`);
+          console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${streamLatency}ms | stream | Q:"${_reqMsg}"`);
           return proxied;
         }
 
@@ -1667,7 +1676,7 @@ export async function POST(req: NextRequest) {
             const streamLatency = Date.now() - startTime;
             recordOutcome(provider, actualModelId, true, streamLatency);
             await logGateway(modelField, actualModelId, provider, 200, streamLatency, 0, 0, null, userMsg, "[relaxed-retry]");
-            console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${streamLatency}ms | relaxed retry`);
+            console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${streamLatency}ms | relaxed-retry stream | Q:"${_reqMsg}"`);
             return buildProxiedResponse(response, provider, actualModelId, isStream, estInputTokens);
           }
           const errText = await response.text().catch(() => "");
@@ -1701,7 +1710,7 @@ export async function POST(req: NextRequest) {
     }
     await logGateway(modelField, lastModelId, lastProvider, 503, latency, 0, 0, lastError.slice(0, 300), userMsg, null);
     recordBattleEvent("fail").catch(() => { /* cosmetic */ });
-    console.log(`[RES:${_reqId}] 503 | ${triedProviders.size} providers tried, ${blockedProviders.size} blocked | ${latency}ms | ${lastError.slice(0, 120)}`);
+    console.log(`[RES:${_reqId}] 503 | ${triedProviders.size} tried ${blockedProviders.size} blocked ${skippedCandidates.length} skipped | ${latency}ms | Q:"${_reqMsg}" | ${lastError.slice(0, 150)}`);
     return openAIError(503, {
       message: `All ${Math.min(MAX_RETRIES, spreadCandidates.length)} models from ${triedProviders.size} providers failed: ${lastError}`,
     });
