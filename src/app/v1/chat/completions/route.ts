@@ -1275,7 +1275,9 @@ export async function POST(req: NextRequest) {
           const badReason = isResponseBad(content, caps.hasTools, hasToolCalls);
           if (badReason) {
             console.log(`[HEDGE-BAD] ${winner.provider}/${winner.model_id} — ${badReason}`);
-            // Fall through to sequential retry
+            // Reset to 0 so sequential retry doesn't skip intermediate same-provider candidates
+            // (hedge picks 1-per-provider across spread indices, leaving gaps)
+            hedgeStartIdx = 0;
           } else {
             if (content && THINK_TAG_RE.test(content)) {
               content = cleanResponseContent(content);
@@ -1320,15 +1322,16 @@ export async function POST(req: NextRequest) {
           }
         } catch {
           // JSON parse failed — fall through to sequential
+          hedgeStartIdx = 0;
         }
       } catch {
         const latency = Date.now() - startTime;
         console.log(`[HEDGE-LOSS:${_reqId}] all top-${hedgeCount} failed | ${latency}ms — continuing sequential`);
+        hedgeStartIdx = 0;
         await Promise.all(
           hedgeContenders.flatMap(c => [recordProviderFailureMem(c.provider), recordCircuitFailure(c.provider)])
         );
       }
-      // hedgeStartIdx already set above (lastHedgeIdx + 1) — no-op here
     }
 
     // Track skipped candidates for possible second-pass retry
