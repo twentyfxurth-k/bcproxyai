@@ -48,16 +48,30 @@ export async function GET() {
     `;
     const cooldownCount = Number(cooldownRows[0]?.count ?? 0);
 
-    // Benchmarked models
-    const benchmarkedRows = await sql<{ count: number }[]>`
-      SELECT COUNT(DISTINCT model_id)::int as count FROM benchmark_results
+    // สอบผ่าน — model ที่ attempt ล่าสุด passed = true
+    const passedRows = await sql<{ count: number }[]>`
+      SELECT COUNT(*)::int as count FROM (
+        SELECT DISTINCT ON (model_id) passed FROM exam_attempts
+        WHERE finished_at IS NOT NULL ORDER BY model_id, started_at DESC
+      ) sub WHERE passed = true
     `;
-    const benchmarkedCount = Number(benchmarkedRows[0]?.count ?? 0);
+    const passedExamCount = Number(passedRows[0]?.count ?? 0);
 
-    // Average score
+    // สอบตก — model ที่ attempt ล่าสุด passed = false
+    const failedRows = await sql<{ count: number }[]>`
+      SELECT COUNT(*)::int as count FROM (
+        SELECT DISTINCT ON (model_id) passed FROM exam_attempts
+        WHERE finished_at IS NOT NULL ORDER BY model_id, started_at DESC
+      ) sub WHERE passed = false
+    `;
+    const failedExamCount = Number(failedRows[0]?.count ?? 0);
+
+    // คะแนนเฉลี่ยของ model ที่ผ่าน
     const avgRows = await sql<{ avg_score: number | null }[]>`
-      SELECT AVG(avg_score) as avg_score FROM (
-        SELECT model_id, AVG(score) as avg_score FROM benchmark_results GROUP BY model_id
+      SELECT AVG(score_pct) as avg_score FROM (
+        SELECT DISTINCT ON (model_id) score_pct FROM exam_attempts
+        WHERE finished_at IS NOT NULL AND passed = true
+        ORDER BY model_id, started_at DESC
       ) sub
     `;
     const avgScore = avgRows[0]?.avg_score;
@@ -116,7 +130,9 @@ export async function GET() {
         totalModels: totalCount,
         availableModels: availableCount,
         cooldownModels: cooldownCount,
-        benchmarkedModels: benchmarkedCount,
+        passedExam: passedExamCount,
+        failedExam: failedExamCount,
+        benchmarkedModels: passedExamCount,
         avgScore: avgScore ? Math.round(avgScore * 10) / 10 : 0,
       },
       modelChanges: {

@@ -12,6 +12,8 @@ import { getSqlClient } from "@/lib/db/schema";
 import { getNextApiKey } from "@/lib/api-keys";
 import { PROVIDER_URLS } from "@/lib/providers";
 import { computeNextExamAt, getLiveSuccessRate } from "@/lib/learning";
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -34,6 +36,32 @@ interface ExamQuestion {
   withTools?: boolean;
   // ถ้ามี → ส่ง tools ไปด้วย
   tools?: Array<Record<string, unknown>>;
+  // ถ้า true → ข้อสอบนี้ต้องอ่านรูป
+  withVision?: boolean;
+  // ชื่อไฟล์รูปใน exam-images/ (ใช้คู่กับ withVision)
+  imageFile?: string;
+}
+
+// ─── Image loader ────────────────────────────────────────────────────────────
+
+const EXAM_IMAGES_DIR = existsSync("/app/exam-images")
+  ? "/app/exam-images"
+  : join(process.cwd(), "exam-images");
+
+const imageCache = new Map<string, string | null>();
+
+function loadExamImage(filename: string): string | null {
+  if (imageCache.has(filename)) return imageCache.get(filename)!;
+  try {
+    const path = join(EXAM_IMAGES_DIR, filename);
+    if (!existsSync(path)) { imageCache.set(filename, null); return null; }
+    const buf = readFileSync(path);
+    const ext = filename.split(".").pop()?.toLowerCase() ?? "jpeg";
+    const mime = ext === "png" ? "image/png" : "image/jpeg";
+    const dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
+    imageCache.set(filename, dataUrl);
+    return dataUrl;
+  } catch { imageCache.set(filename, null); return null; }
 }
 
 // ─── Helper: JSON extraction ──────────────────────────────────────────────────
@@ -245,6 +273,67 @@ export const EXAM_QUESTIONS: ExamQuestion[] = [
       return { passed: false, reason: `city="${city}" not Bangkok` };
     },
   },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Vision questions — ข้อสอบอ่านรูป (withVision: true)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ───── Q11: Vision — อ่านชื่อแบรนด์ภาษาอังกฤษจากรูปสินค้า ─────
+  {
+    id: "vision_brand_v1",
+    category: "vision",
+    question:
+      "ดูรูปสินค้านี้แล้วตอบ: ชื่อแบรนด์ (ยี่ห้อ) ของสินค้าในรูปคืออะไร? ตอบเป็นภาษาอังกฤษ 1-2 คำ ไม่ต้องอธิบาย",
+    expected: "TOA SuperShield",
+    withVision: true,
+    imageFile: "4a7e474323b961fb97171c697eba9a26.jpg",
+    check: (answer) => {
+      const clean = stripThink(answer).toLowerCase();
+      if (/supershield/.test(clean) || /toa/.test(clean))
+        return { passed: true, reason: "correct brand" };
+      return { passed: false, reason: `expected TOA/SuperShield, got "${answer.slice(0, 60)}"` };
+    },
+  },
+
+  // ───── Q12: Vision — บอกประเภทห้องจากรูปภาพ ─────
+  {
+    id: "vision_room_v1",
+    category: "vision",
+    question:
+      "รูปนี้เป็นห้องประเภทไหน? ตอบ 1 คำ ภาษาไทยหรืออังกฤษ (เช่น ห้องครัว, ห้องนั่งเล่น, bedroom, kitchen)",
+    expected: "ห้องนอน / bedroom",
+    withVision: true,
+    imageFile: "dFQROr7oWzulq5Fa6rV0xIkOxRr8bPnvUukdTe8Kafg8nES4w8Dl0PpB8MIiC1HA1Oy.jpg",
+    check: (answer) => {
+      const clean = stripThink(answer).toLowerCase();
+      if (/ห้องนอน|bedroom|นอน/.test(clean))
+        return { passed: true, reason: "correct: bedroom" };
+      return { passed: false, reason: `expected ห้องนอน/bedroom, got "${answer.slice(0, 60)}"` };
+    },
+  },
+
+  // ───── Q13: Vision — อ่านชื่อตัวละครจากรูปการ์ตูนไทย ─────
+  {
+    id: "vision_cartoon_v1",
+    category: "vision",
+    question:
+      "อ่านป้ายและข้อความในรูปการ์ตูนนี้ มีตัวละครหรือชื่อสถานที่อะไรบ้าง? ตอบชื่อที่เห็นทั้งหมด",
+    expected: "ลุงจืด, น้องกุ้ง, OpenClaw, ห้องประดิษฐ์",
+    withVision: true,
+    imageFile: "f6d2ecf2-83e0-4738-b9e9-fe749f3beb5c.jpg",
+    check: (answer) => {
+      const clean = stripThink(answer);
+      // ต้องอ่านได้อย่างน้อย 1 ชื่อจากรูป
+      const hits: string[] = [];
+      if (/ลุงจืด/.test(clean)) hits.push("ลุงจืด");
+      if (/น้องกุ้ง/.test(clean)) hits.push("น้องกุ้ง");
+      if (/openclaw/i.test(clean)) hits.push("OpenClaw");
+      if (/ห้องประดิษฐ์|ประดิษฐ์/.test(clean)) hits.push("ห้องประดิษฐ์");
+      if (hits.length >= 1)
+        return { passed: true, reason: `read ${hits.length} names: ${hits.join(", ")}` };
+      return { passed: false, reason: `no Thai text recognized: "${answer.slice(0, 80)}"` };
+    },
+  },
 ];
 
 // ─── Ask Model ────────────────────────────────────────────────────────────────
@@ -275,9 +364,21 @@ async function askModel(
     headers["X-Title"] = "SMLGateway Exam";
   }
 
+  // สร้าง content — ถ้าเป็น vision ส่ง multipart array [text, image_url]
+  let messageContent: unknown = question.question;
+  if (question.withVision && question.imageFile) {
+    const imageUrl = loadExamImage(question.imageFile);
+    if (imageUrl) {
+      messageContent = [
+        { type: "text", text: question.question },
+        { type: "image_url", image_url: { url: imageUrl } },
+      ];
+    }
+  }
+
   const reqBody: Record<string, unknown> = {
     model: modelId,
-    messages: [{ role: "user", content: question.question }],
+    messages: [{ role: "user", content: messageContent }],
     max_tokens: 500,
     temperature: 0,
   };
@@ -338,6 +439,7 @@ interface DbModel {
   provider: string;
   model_id: string;
   supports_tools: number | null;
+  supports_vision: number | null;
 }
 
 async function examineModel(model: DbModel): Promise<void> {
@@ -360,15 +462,27 @@ async function examineModel(model: DbModel): Promise<void> {
   await logWorker("exam", `📝 เริ่มสอบ: ${model.model_id} (attempt #${attemptNumber})`);
 
   let passedCount = 0;
+  let skippedCount = 0;
   let totalLatency = 0;
   let fatalError: string | null = null;
 
   for (const q of EXAM_QUESTIONS) {
-    // ข้อ tool call — ถ้า model ไม่รองรับ tool → skip (count เป็น fail)
+    // ข้อ tool call — ถ้า model ไม่รองรับ tool → skip
     if (q.withTools && model.supports_tools !== 1) {
+      skippedCount++;
       await sql`
         INSERT INTO exam_answers (attempt_id, question_id, category, question, expected, answer, passed, check_method, fail_reason)
         VALUES (${attemptId}, ${q.id}, ${q.category}, ${q.question.slice(0, 500)}, ${q.expected}, ${null}, ${false}, ${"skipped"}, ${"model does not support tools"})
+      `;
+      continue;
+    }
+
+    // ข้อ vision — ถ้า model ไม่รองรับ vision → skip
+    if (q.withVision && model.supports_vision !== 1) {
+      skippedCount++;
+      await sql`
+        INSERT INTO exam_answers (attempt_id, question_id, category, question, expected, answer, passed, check_method, fail_reason)
+        VALUES (${attemptId}, ${q.id}, ${q.category}, ${q.question.slice(0, 500)}, ${q.expected}, ${null}, ${false}, ${"skipped"}, ${"model does not support vision"})
       `;
       continue;
     }
@@ -402,7 +516,9 @@ async function examineModel(model: DbModel): Promise<void> {
     if (fatalError) break;
   }
 
-  const scorePct = (passedCount / EXAM_QUESTIONS.length) * 100;
+  // คิดคะแนนเฉพาะข้อที่ทำจริง (ไม่รวม skipped) → ไม่ลงโทษ model ที่ไม่รองรับ vision/tools
+  const attemptedCount = EXAM_QUESTIONS.length - skippedCount;
+  const scorePct = attemptedCount > 0 ? (passedCount / attemptedCount) * 100 : 0;
   const passed = scorePct >= PASS_THRESHOLD_PCT;
 
   // Adaptive retry: ดูจาก live production success rate + exam fail streak
@@ -418,6 +534,7 @@ async function examineModel(model: DbModel): Promise<void> {
   await sql`
     UPDATE exam_attempts
     SET finished_at = now(),
+        total_questions = ${attemptedCount},
         passed_questions = ${passedCount},
         score_pct = ${scorePct},
         passed = ${passed},
@@ -430,9 +547,10 @@ async function examineModel(model: DbModel): Promise<void> {
 
   const icon = passed ? "✅" : "❌";
   const status = passed ? "ผ่าน" : "ตก";
+  const skipNote = skippedCount > 0 ? ` [skip ${skippedCount}]` : "";
   await logWorker(
     "exam",
-    `${icon} ${status}: ${model.model_id} — ${passedCount}/${EXAM_QUESTIONS.length} (${scorePct.toFixed(0)}%)${fatalError ? ` [${fatalError.slice(0, 80)}]` : ""}`,
+    `${icon} ${status}: ${model.model_id} — ${passedCount}/${attemptedCount} (${scorePct.toFixed(0)}%)${skipNote}${fatalError ? ` [${fatalError.slice(0, 80)}]` : ""}`,
     passed ? "success" : "warn"
   );
 }
@@ -460,7 +578,7 @@ export async function runExams(): Promise<{ examined: number; passed: number; fa
       FROM health_logs
       ORDER BY model_id, id DESC
     )
-    SELECT m.id, m.provider, m.model_id, m.supports_tools
+    SELECT m.id, m.provider, m.model_id, m.supports_tools, m.supports_vision
     FROM models m
     LEFT JOIN latest_attempt la ON la.model_id = m.id
     LEFT JOIN latest_health lh ON lh.model_id = m.id

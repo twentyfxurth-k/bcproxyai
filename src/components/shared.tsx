@@ -16,6 +16,8 @@ export interface Stats {
   availableModels: number;
   cooldownModels: number;
   benchmarkedModels: number;
+  passedExam: number;
+  failedExam: number;
   avgScore: number;
 }
 

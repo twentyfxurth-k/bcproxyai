@@ -9,18 +9,16 @@ interface StatsCardsProps {
 }
 
 export function StatsCards({ stats, loading }: StatsCardsProps) {
-  const benchmarkPct = stats && stats.totalModels > 0
-    ? Math.round((stats.benchmarkedModels / stats.totalModels) * 100)
-    : 0;
+  const examined = (stats?.passedExam ?? 0) + (stats?.failedExam ?? 0);
 
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4 mt-6">
       {[
         { label: "โมเดลทั้งหมด",   value: stats?.totalModels ?? 0,       color: "from-indigo-500 to-purple-500",  delay: "stagger-1", suffix: "" },
-        { label: "พร้อมใช้งาน",    value: stats?.availableModels ?? 0,   color: "from-emerald-500 to-teal-500",   delay: "stagger-2", suffix: "" },
-        { label: "พักผ่อน",         value: stats?.cooldownModels ?? 0,    color: "from-amber-500 to-orange-500",   delay: "stagger-3", suffix: "" },
-        { label: "ผ่าน benchmark",  value: stats?.benchmarkedModels ?? 0, color: "from-cyan-500 to-sky-500",       delay: "stagger-4", suffix: benchmarkPct > 0 ? ` (${benchmarkPct}%)` : "" },
-        { label: "คะแนนเฉลี่ย",    value: stats?.avgScore ?? 0,          color: "from-pink-500 to-rose-500",      delay: "stagger-5", suffix: "/10" },
+        { label: "สอบผ่าน",         value: stats?.passedExam ?? 0,        color: "from-emerald-500 to-teal-500",   delay: "stagger-2", suffix: "" },
+        { label: "สอบตก",           value: stats?.failedExam ?? 0,        color: "from-red-500 to-rose-500",       delay: "stagger-3", suffix: "" },
+        { label: "รอสอบ",           value: (stats?.totalModels ?? 0) - examined, color: "from-amber-500 to-orange-500", delay: "stagger-4", suffix: "" },
+        { label: "คะแนนเฉลี่ย",    value: stats?.avgScore ?? 0,          color: "from-cyan-500 to-sky-500",       delay: "stagger-5", suffix: "%" },
       ].map((card) => (
         <div key={card.label} className={`card-3d glass rounded-2xl p-5 animate-fade-in-up ${card.delay}`}>
           <div className={`text-4xl font-extrabold bg-gradient-to-r ${card.color} bg-clip-text text-transparent mb-1`}>
