@@ -70,6 +70,8 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [saveResult, setSaveResult] = useState<Record<string, "ok" | "error">>({});
+  const [testing, setTesting] = useState<Record<string, boolean>>({});
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; models?: number; error?: string }>>({});
   const [scanning, setScanning] = useState(false);
 
   const fetchStatuses = useCallback(() => {
@@ -87,6 +89,27 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
     fetchStatuses();
   }, [open, fetchStatuses]);
 
+  const handleTestKey = async (provider: string) => {
+    const apiKey = keyInputs[provider]?.trim();
+    if (!apiKey) return;
+
+    setTesting((p) => ({ ...p, [provider]: true }));
+    setTestResult((p) => ({ ...p, [provider]: undefined as any }));
+    try {
+      const res = await fetch("/api/setup/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, apiKey }),
+      });
+      const data = await res.json();
+      setTestResult((p) => ({ ...p, [provider]: data }));
+    } catch {
+      setTestResult((p) => ({ ...p, [provider]: { ok: false, error: "Network error" } }));
+    } finally {
+      setTesting((p) => ({ ...p, [provider]: false }));
+    }
+  };
+
   const handleSaveKey = async (provider: string) => {
     const apiKey = keyInputs[provider]?.trim();
     if (!apiKey) return;
@@ -101,6 +124,7 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
       if (res.ok) {
         setSaveResult((p) => ({ ...p, [provider]: "ok" }));
         setKeyInputs((p) => ({ ...p, [provider]: "" }));
+        setTestResult((p) => ({ ...p, [provider]: undefined as any }));
         // Refresh statuses
         fetchStatuses();
       } else {
@@ -240,6 +264,9 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
               const noKeyReq = st?.noKeyRequired ?? false;
               const c = PROVIDER_COLORS[info.provider] ?? { text: "text-gray-300", bg: "bg-gray-700/40", border: "border-gray-600/40", glow: "rgba(156,163,175,0.5)" };
               const isSaving = saving[info.provider] ?? false;
+              const isTesting = testing[info.provider] ?? false;
+              const testPassed = testResult[info.provider]?.ok === true;
+              const testRes = testResult[info.provider];
               const result = saveResult[info.provider];
 
               const isEnabled = st?.enabled ?? true;
@@ -319,23 +346,43 @@ export function SetupModal({ open, onClose }: SetupModalProps) {
                           ไม่ต้องใช้ key — รันบนเครื่องตัวเอง
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <code className="text-[11px] font-mono text-gray-500 shrink-0">{info.envVar}=</code>
                           <input
                             type="password"
                             placeholder={hasKey ? "••••••••••••" : "วาง API Key ที่นี่..."}
                             value={keyInputs[info.provider] ?? ""}
-                            onChange={(e) => setKeyInputs((p) => ({ ...p, [info.provider]: e.target.value }))}
-                            onKeyDown={(e) => { if (e.key === "Enter") handleSaveKey(info.provider); }}
+                            onChange={(e) => {
+                              setKeyInputs((p) => ({ ...p, [info.provider]: e.target.value }));
+                              setTestResult((p) => ({ ...p, [info.provider]: undefined as any }));
+                            }}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleTestKey(info.provider); }}
                             className="flex-1 min-w-0 text-xs font-mono bg-gray-800/80 border border-white/10 rounded-lg px-3 py-1.5 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
                           />
                           <button
+                            onClick={() => handleTestKey(info.provider)}
+                            disabled={isTesting || !(keyInputs[info.provider]?.trim())}
+                            className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
+                          >
+                            {isTesting ? "..." : "ทดสอบ"}
+                          </button>
+                          <button
                             onClick={() => handleSaveKey(info.provider)}
-                            disabled={isSaving || !(keyInputs[info.provider]?.trim())}
+                            disabled={isSaving || !testPassed}
                             className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
                           >
                             {isSaving ? "..." : "บันทึก"}
                           </button>
+                          {testRes?.ok === true && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              ✓ ใช้ได้ ({testRes.models} models)
+                            </span>
+                          )}
+                          {testRes?.ok === false && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30" title={testRes.error}>
+                              ✗ ใช้ไม่ได้
+                            </span>
+                          )}
                           {hasDbKey && (
                             <button
                               onClick={() => handleDeleteKey(info.provider)}
