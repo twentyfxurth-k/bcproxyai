@@ -165,6 +165,7 @@ Trigger manual: `curl -X POST http://localhost:3334/api/worker`
 |---|---|
 | `POST /v1/chat/completions` | OpenAI-compatible chat (text / vision / tools / stream) |
 | `GET  /v1/models` | รายการโมเดลทั้งหมด (รวม virtual models) |
+| `GET  /v1/models/:id` | ดึงข้อมูล model ตัวเดียว รองรับ ID ที่มี `/` เช่น `sml/tools`, `groq/vendor/model` |
 | `GET  /v1/models/search` | ค้นหา/จัดอันดับ model ตาม category, context, tools ฯลฯ |
 | `POST /v1/compare` | ยิง prompt เดียวไปหลาย model พร้อมกัน (สูงสุด 10) |
 | `POST /v1/structured` | Chat + JSON schema validation + auto-retry ถ้า output ไม่ตรง |

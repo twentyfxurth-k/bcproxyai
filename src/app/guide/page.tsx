@@ -600,6 +600,7 @@ docker compose up -d --build`}</Code>
                 {[
                   ["POST", "/v1/chat/completions", "Chat — text / vision / tools / streaming"],
                   ["GET", "/v1/models", "รายชื่อ model ทั้งหมด (OpenAI format)"],
+                  ["GET", "/v1/models/:id", "ดึงข้อมูล model — รองรับ ID มี / เช่น sml/tools, groq/vendor/model"],
                   ["GET", "/v1/models/search", "ค้นหา/จัดอันดับ model ตาม category, context, ฯลฯ"],
                   ["POST", "/v1/compare", "ยิง prompt ไปหลาย model พร้อมกัน (≤10)"],
                   ["POST", "/v1/structured", "Chat + JSON schema validation + auto-retry"],
