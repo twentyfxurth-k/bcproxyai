@@ -7,6 +7,23 @@
 
 **Local-only** — ออกแบบให้รันบน Docker Desktop เครื่องเดียว ไม่มี auth / multi-tenant / public deploy (หลีกเลี่ยงปัญหา provider IP lock)
 
+## สิ่งที่ Dev ได้ทันที
+
+| | |
+|---|---|
+| 🆓 Free | 21 providers ฟรี, 300+ models, ไม่มี token cost |
+| ⚡ Fast | hedge top-3, warmup, semantic cache → p50 ~500ms |
+| 🎯 Smart routing | per-category teacher (thai/code/tools/vision/...) |
+| 🔄 Auto-fallback | provider ล่ม → สลับทันที, circuit breaker + cooldown |
+| 🔌 Drop-in | เปลี่ยนแค่ `baseURL` ของ OpenAI SDK → ใช้ได้เลย |
+| 📐 Structured JSON | `/v1/structured` — schema validation + auto-retry |
+| ⚖️ A/B test | `/v1/compare` ยิง prompt ไป N model พร้อมกัน |
+| 🔍 Model search | `/v1/models/search` หา model ที่เก่งด้านที่ต้องการ |
+| 📚 Prompt library | เก็บ system prompt ใช้ซ้ำด้วยชื่อ |
+| 🔬 Trace | `/v1/trace/:reqId` debug request ย้อนหลัง |
+| 📊 Stats | `/api/my-stats` ของ IP ตัวเอง (p50/p95/p99) |
+| 🎛 Control headers | `X-SMLGateway-Prefer/Exclude/Strategy/Max-Latency` |
+
 ---
 
 ## สารบัญ
@@ -17,6 +34,7 @@
 - [โรงเรียน — Exam + Teachers](#โรงเรียน--exam--teachers)
 - [Smart Routing](#smart-routing)
 - [API](#api)
+- [Dev Tools](#dev-tools)
 - [Integration](#integration)
 - [Port Map](#port-map)
 - [Development](#development)
@@ -196,6 +214,63 @@ curl -X POST http://localhost:3334/v1/chat/completions \
   -H "X-SMLGateway-Strategy: fastest" \
   -H "X-SMLGateway-Max-Latency: 3000" \
   -d '{"model":"sml/auto","messages":[...]}'
+```
+
+---
+
+## Dev Tools
+
+### หา model ตาม capability
+```bash
+curl "http://localhost:3334/v1/models/search?category=thai&min_context=200000&top=3"
+curl "http://localhost:3334/v1/models/search?category=code&supports_tools=1&top=5"
+```
+
+### เปรียบเทียบ model
+```bash
+curl -X POST http://localhost:3334/v1/compare \
+  -d '{"messages":[...],"models":["groq/...","cerebras/..."],"max_tokens":200}'
+```
+
+### Structured output (JSON schema + auto-retry)
+```bash
+curl -X POST http://localhost:3334/v1/structured \
+  -d '{
+    "messages":[{"role":"user","content":"Describe a fruit"}],
+    "schema":{"type":"object","required":["name","color"],"properties":{...}},
+    "max_retries":2
+  }'
+# → { ok, attempts, data, model, provider, latency_ms, request_ids }
+```
+
+### Prompt library
+```bash
+# สร้าง
+curl -X POST http://localhost:3334/v1/prompts \
+  -d '{"name":"pirate","content":"You are a pirate","description":"..."}'
+
+# ใช้ในแชท — แค่เพิ่ม "prompt": "pirate"
+curl -X POST http://localhost:3334/v1/chat/completions \
+  -d '{"model":"sml/auto","prompt":"pirate","messages":[...]}'
+
+# รายการ + แก้ + ลบ
+curl http://localhost:3334/v1/prompts
+curl -X PUT    http://localhost:3334/v1/prompts/pirate -d '{...}'
+curl -X DELETE http://localhost:3334/v1/prompts/pirate
+```
+
+### Trace request
+```bash
+# ทุก response มี header: X-SMLGateway-Request-Id: <id>
+curl http://localhost:3334/v1/trace/<id>
+# → { requestId, found, entry: { resolved_model, provider, latency_ms, ... } }
+```
+
+### Usage stats
+```bash
+curl "http://localhost:3334/api/my-stats?window=24h"
+# → { total, success, p50/p95/p99_latency_ms, top_models, by_hour }
+# window: 1h | 6h | 24h | 7d | 30d
 ```
 
 ---

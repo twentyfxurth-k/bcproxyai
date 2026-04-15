@@ -311,6 +311,36 @@ export default function Dashboard() {
         {/* ── Live Mascot Theater (data-driven from gateway logs) ───────── */}
         <MascotScene />
 
+        {/* ── Dev Tools banner — quick links to new endpoints ───────────── */}
+        <section className="animate-fade-in-up stagger-0">
+          <div className="glass rounded-xl border border-indigo-500/20 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xl">🛠</span>
+              <span className="font-bold text-white text-lg">เครื่องมือ Dev</span>
+              <a href="/guide#dev-tools" target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-indigo-300 hover:text-white">คู่มือเต็ม →</a>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-1.5">
+              {[
+                { path: "/v1/models/search", label: "Search Model", icon: "🔍" },
+                { path: "/v1/compare", label: "Compare (≤10)", icon: "⚖️" },
+                { path: "/v1/structured", label: "JSON Schema", icon: "📐" },
+                { path: "/v1/trace/:id", label: "Trace Request", icon: "🔬" },
+                { path: "/api/my-stats", label: "My Stats", icon: "📊" },
+                { path: "/v1/prompts", label: "Prompt Library", icon: "📚" },
+                { path: "/api/metrics", label: "Prometheus", icon: "📈" },
+              ].map((ep) => (
+                <code key={ep.path} className="flex items-center gap-1.5 px-2 py-1.5 rounded bg-gray-900/50 border border-white/5 text-xs">
+                  <span>{ep.icon}</span>
+                  <span className="text-indigo-300 truncate">{ep.label}</span>
+                </code>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Control headers: <code className="text-amber-300">X-SMLGateway-Prefer</code> · <code className="text-amber-300">Exclude</code> · <code className="text-amber-300">Strategy: fastest|strongest</code> · <code className="text-amber-300">Max-Latency</code>
+            </p>
+          </div>
+        </section>
+
         {/* ── Gateway Config — moved to /guide page ──────────────────────── */}
 
         {/* ── Gateway Logs (top of dashboard, wide + big font) ──────────── */}

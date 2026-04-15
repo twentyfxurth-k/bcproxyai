@@ -335,6 +335,7 @@ const NAV = [
   { id: "install", label: "ติดตั้ง" },
   { id: "openclaw", label: "OpenClaw" },
   { id: "api", label: "API Reference" },
+  { id: "dev-tools", label: "Dev Tools" },
   { id: "benchmark", label: "ระบบสอบ" },
   { id: "troubleshoot", label: "แก้ปัญหา" },
 ];
@@ -597,13 +598,23 @@ docker compose up -d --build`}</Code>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {[
-                  ["POST", "/v1/chat/completions", "Chat — รองรับ text, vision, tools, streaming"],
+                  ["POST", "/v1/chat/completions", "Chat — text / vision / tools / streaming"],
                   ["GET", "/v1/models", "รายชื่อ model ทั้งหมด (OpenAI format)"],
-                  ["POST", "/v1/embeddings", "Embeddings (provider ที่รองรับ: openrouter, mistral, ollama)"],
-                  ["POST", "/v1/completions", "Legacy completions (บาง provider)"],
+                  ["GET", "/v1/models/search", "ค้นหา/จัดอันดับ model ตาม category, context, ฯลฯ"],
+                  ["POST", "/v1/compare", "ยิง prompt ไปหลาย model พร้อมกัน (≤10)"],
+                  ["POST", "/v1/structured", "Chat + JSON schema validation + auto-retry"],
+                  ["GET", "/v1/trace/:reqId", "ดู log ของ request เดิม"],
+                  ["GET", "/v1/prompts", "รายการ system prompts ที่บันทึกไว้"],
+                  ["POST", "/v1/prompts", "สร้าง/เขียนทับ prompt"],
+                  ["GET", "/v1/prompts/:name", "ดึง prompt"],
+                  ["PUT", "/v1/prompts/:name", "แก้ไข"],
+                  ["DELETE", "/v1/prompts/:name", "ลบ"],
+                  ["GET", "/api/my-stats", "สรุปการใช้งานของ IP ตัวเอง"],
+                  ["POST", "/v1/embeddings", "Embeddings (openrouter / mistral / ollama)"],
+                  ["POST", "/v1/completions", "Legacy completions"],
                 ].map(([m, p, d]) => (
                   <tr key={p}>
-                    <td className="py-2 pr-4"><span className={`font-mono text-xs font-bold ${m === "POST" ? "text-emerald-300" : "text-blue-300"}`}>{m}</span></td>
+                    <td className="py-2 pr-4"><span className={`font-mono text-xs font-bold ${m === "POST" ? "text-emerald-300" : m === "GET" ? "text-blue-300" : m === "PUT" ? "text-amber-300" : "text-rose-300"}`}>{m}</span></td>
                     <td className="py-2 pr-4"><InlineCode>{p}</InlineCode></td>
                     <td className="py-2 text-gray-300">{d}</td>
                   </tr>
@@ -618,9 +629,12 @@ docker compose up -d --build`}</Code>
               <tbody className="divide-y divide-white/5">
                 {[
                   ["X-SMLGateway-Model", "model จริงที่ถูกเลือกใช้"],
-                  ["X-SMLGateway-Provider", "provider ที่เรียกจริง (openrouter/groq/cerebras/...)"],
-                  ["X-SMLGateway-Latency-Ms", "เวลาตอบกลับจริงของ provider"],
-                  ["X-SMLGateway-Category", "หมวดที่ระบบ classify request ไว้ (thai/code/math/tools/...)"],
+                  ["X-SMLGateway-Provider", "provider ที่เรียกจริง (groq/nvidia/cerebras/...)"],
+                  ["X-SMLGateway-Request-Id", "ใช้กับ /v1/trace/:reqId เพื่อดูรายละเอียด"],
+                  ["X-SMLGateway-Hedge", "true ถ้า response มาจาก hedge winner"],
+                  ["X-SMLGateway-Cache", "HIT ถ้าดึงจาก semantic cache"],
+                  ["X-SMLGateway-Consensus", "รายชื่อ model (เฉพาะ sml/consensus)"],
+                  ["X-Resceo-Backoff", "true ถ้ายิงถี่เกิน soft limit (hint, ไม่บล็อก)"],
                 ].map(([h, d]) => (
                   <tr key={h}>
                     <td className="py-2 pr-4"><InlineCode>{h}</InlineCode></td>
@@ -664,6 +678,140 @@ docker compose up -d --build`}</Code>
       }
     }]
   }'`}</Code>
+        </Section>
+
+        <Section id="dev-tools" icon="&#128736;" title="Dev Tools — สิ่งพิเศษสำหรับนักพัฒนา">
+          <P>
+            SMLGateway มี endpoint ช่วย dev ทำงานได้เร็วขึ้น — ไม่ต้องเขียน retry,
+            ไม่ต้องรู้จัก model ทุกตัว, ไม่ต้องเก็บ prompt ยาวๆ ใน code
+          </P>
+
+          <SubTitle>1. ค้นหา Model ตาม Capability</SubTitle>
+          <P>
+            หา model ที่เก่งด้านที่ต้องการ — category, context, tools support ฯลฯ
+          </P>
+          <Code>{`# หา model ภาษาไทยที่รับ context 200K+ ท็อป 3
+curl "http://localhost:3334/v1/models/search?category=thai&min_context=200000&top=3"
+
+# หา model tools calling
+curl "http://localhost:3334/v1/models/search?category=code&supports_tools=1&top=5"`}</Code>
+          <P>
+            Query params: <InlineCode>category</InlineCode> (thai/code/tools/vision/math/
+            reasoning/json/instruction/extraction/classification/comprehension/safety),
+            <InlineCode>min_context</InlineCode>, <InlineCode>max_context</InlineCode>,
+            <InlineCode>supports_tools</InlineCode>, <InlineCode>supports_vision</InlineCode>,
+            <InlineCode>provider</InlineCode>, <InlineCode>tier</InlineCode>,
+            <InlineCode>exclude_cooldown</InlineCode>, <InlineCode>top</InlineCode>
+          </P>
+
+          <SubTitle>2. เปรียบเทียบ Model</SubTitle>
+          <P>
+            ยิง prompt เดียวไปหลาย model พร้อมกัน → เปรียบเทียบ content + latency
+          </P>
+          <Code>{`curl -X POST http://localhost:3334/v1/compare \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "messages": [{"role":"user","content":"อธิบาย recursion"}],
+    "models": [
+      "groq/moonshotai/kimi-k2-instruct-0905",
+      "cerebras/qwen-3-235b-a22b-instruct-2507",
+      "nvidia/meta/llama-4-maverick-17b-128e-instruct"
+    ],
+    "max_tokens": 200,
+    "timeout_ms": 30000
+  }'`}</Code>
+
+          <SubTitle>3. Structured Output (JSON Schema + Auto-retry)</SubTitle>
+          <P>
+            ต้องการ JSON ตาม schema ที่กำหนด — ระบบ validate + retry (default 2 ครั้ง) ให้
+            ไม่ต้องเขียน parse/retry logic เอง
+          </P>
+          <Code>{`curl -X POST http://localhost:3334/v1/structured \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "sml/auto",
+    "messages": [{"role":"user","content":"Describe a fruit"}],
+    "schema": {
+      "type": "object",
+      "required": ["name", "color", "taste"],
+      "properties": {
+        "name": {"type": "string"},
+        "color": {"type": "string"},
+        "sweetness": {"type": "integer"}
+      }
+    },
+    "max_retries": 2
+  }'
+
+# Response: { ok, attempts, data: { name, color, taste, sweetness }, model, provider, latency_ms, request_ids }`}</Code>
+
+          <SubTitle>4. Prompt Library</SubTitle>
+          <P>
+            เก็บ system prompt ยาวๆ ไว้เรียกใช้ด้วยชื่อ — ไม่ต้องฝังใน client code
+          </P>
+          <Code>{`# สร้าง
+curl -X POST http://localhost:3334/v1/prompts \\
+  -H "Content-Type: application/json" \\
+  -d '{"name":"pirate","content":"You are a pirate. Short answers only.","description":"Pirate persona"}'
+
+# ใช้ในแชท — แค่ใส่ "prompt": "pirate"
+curl -X POST http://localhost:3334/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"sml/auto","prompt":"pirate","messages":[{"role":"user","content":"how to fish"}]}'
+
+# รายการทั้งหมด
+curl http://localhost:3334/v1/prompts
+
+# แก้ไข / ลบ
+curl -X PUT    http://localhost:3334/v1/prompts/pirate -d '{...}'
+curl -X DELETE http://localhost:3334/v1/prompts/pirate`}</Code>
+
+          <SubTitle>5. Trace — Debug Request ย้อนหลัง</SubTitle>
+          <P>
+            ทุก response มี <InlineCode>X-SMLGateway-Request-Id</InlineCode> → เอาไปเรียก
+            trace endpoint ดูได้ว่าเกิดอะไรกับ request นั้นๆ
+          </P>
+          <Code>{`# ยิง chat ธรรมดา
+curl -D - http://localhost:3334/v1/chat/completions \\
+  -d '{"model":"sml/auto","messages":[{"role":"user","content":"hi"}]}'
+# → response headers มี: X-SMLGateway-Request-Id: 5m3obi
+
+# ดู trace
+curl http://localhost:3334/v1/trace/5m3obi
+# → { requestId, found, entry: { resolved_model, provider, latency_ms, input_tokens, ... } }`}</Code>
+
+          <SubTitle>6. Usage Stats ของ IP ตัวเอง</SubTitle>
+          <Code>{`curl "http://localhost:3334/api/my-stats?window=24h"
+# → { total, success, p50_latency_ms, p95_latency_ms, p99_latency_ms,
+#     top_models: [...], by_hour: [...] }
+# window: 1h | 6h | 24h | 7d | 30d`}</Code>
+
+          <SubTitle>7. Control Headers — บังคับ/หลีกเลี่ยง Provider</SubTitle>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-white/5">
+                {[
+                  ["X-SMLGateway-Prefer", "groq,cerebras", "ดัน provider เหล่านี้ขึ้นบนสุด"],
+                  ["X-SMLGateway-Exclude", "mistral", "ตัด provider เหล่านี้ออก"],
+                  ["X-SMLGateway-Max-Latency", "3000", "กรอง model ที่ avg_latency เกินนี้ (ms)"],
+                  ["X-SMLGateway-Strategy", "fastest", "เรียงตาม latency asc"],
+                  ["X-SMLGateway-Strategy", "strongest", "เรียงตาม tier + context desc"],
+                ].map(([h, v, d], i) => (
+                  <tr key={i}>
+                    <td className="py-2 pr-4"><InlineCode>{h}</InlineCode></td>
+                    <td className="py-2 pr-4"><InlineCode>{v}</InlineCode></td>
+                    <td className="py-2 text-gray-300">{d}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Code>{`curl -X POST http://localhost:3334/v1/chat/completions \\
+  -H "X-SMLGateway-Prefer: groq,cerebras" \\
+  -H "X-SMLGateway-Exclude: mistral" \\
+  -H "X-SMLGateway-Strategy: fastest" \\
+  -H "X-SMLGateway-Max-Latency: 3000" \\
+  -d '{"model":"sml/auto","messages":[...]}'`}</Code>
         </Section>
 
         <Section id="benchmark" icon="&#127891;" title="ระบบสอบ (Benchmark)">
