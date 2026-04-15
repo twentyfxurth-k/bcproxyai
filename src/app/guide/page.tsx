@@ -234,8 +234,15 @@ Model:       sml/auto  (หรือเลือก model เฉพาะ)
 
 Dev tools เพิ่มเติม:
   POST /v1/compare                   ยิง prompt ไปหลาย model พร้อมกัน (max 10)
+  POST /v1/structured                Chat + JSON schema validation + auto-retry
   GET  /v1/trace/:reqId              ดู log ของ request เดิม
   GET  /api/my-stats?window=24h      สรุปใช้งานของ IP ตัวเอง (p50/p95/p99)
+  GET  /v1/prompts                   รายการ system prompts ที่บันทึกไว้
+  POST /v1/prompts                   สร้าง/เขียนทับ { name, content, description? }
+  GET|PUT|DELETE /v1/prompts/:name   ดึง/แก้/ลบ
+
+ใช้ prompt ที่บันทึกไว้ในแชท:
+  { "model": "sml/auto", "prompt": "my-prompt-name", "messages": [...] }
 
 Dev controls (headers):
   X-SMLGateway-Prefer:   groq,cerebras       ดัน provider ขึ้นบน

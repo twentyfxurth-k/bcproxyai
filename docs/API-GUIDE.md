@@ -295,6 +295,121 @@ POST /v1/audio/translations
 
 ---
 
+### 8. Models Search
+
+```
+GET /v1/models/search?category=thai&min_context=200000&supports_tools=1&top=5
+```
+
+Filter + rank models ตาม capability. Query params:
+- `category` — thai, code, tools, vision, math, reasoning, json, instruction, extraction, classification, comprehension, safety
+- `min_context` / `max_context` — integer
+- `supports_tools` / `supports_vision` / `supports_reasoning` / `supports_json` — 0 | 1
+- `provider` — groq, nvidia, cerebras, ...
+- `tier` — small, medium, large, xlarge
+- `exclude_cooldown` — 1 (default) | 0
+- `top` — 1-200 (default 20)
+
+Response เรียงตาม category score → context → avg latency
+
+### 9. Compare
+
+```
+POST /v1/compare
+```
+
+ยิง prompt เดียวกันไปหลาย model พร้อมกัน (สูงสุด 10 ตัว) แล้วคืน side-by-side
+
+```json
+{
+  "messages": [{"role": "user", "content": "..."}],
+  "models": ["groq/kimi-k2", "cerebras/qwen-3-235b", "nvidia/llama-4-maverick"],
+  "max_tokens": 200,
+  "timeout_ms": 30000
+}
+```
+
+### 10. Structured Output
+
+```
+POST /v1/structured
+```
+
+Chat + JSON schema validation + auto-retry (default 2 ครั้ง) ถ้า output ไม่ตรง schema
+
+```json
+{
+  "model": "sml/auto",
+  "messages": [{"role": "user", "content": "Describe a fruit"}],
+  "schema": {
+    "type": "object",
+    "required": ["name", "color", "taste"],
+    "properties": {
+      "name": {"type": "string"},
+      "color": {"type": "string"},
+      "sweetness": {"type": "integer"}
+    }
+  },
+  "max_retries": 2
+}
+```
+
+Response: `{ ok, attempts, data, model, provider, latency_ms, request_ids }`
+
+### 11. Trace
+
+```
+GET /v1/trace/:reqId
+```
+
+ดู log ละเอียดของ request เดิม (ใช้ `X-SMLGateway-Request-Id` header ที่ได้จาก response)
+
+### 12. My Stats
+
+```
+GET /api/my-stats?window=24h
+```
+
+สรุปการใช้งานของ IP ตัวเอง — total, p50/p95/p99, top models, by hour
+Windows: `1h`, `6h`, `24h`, `7d`, `30d`
+
+### 13. Prompt Library
+
+```
+GET    /v1/prompts              รายการทั้งหมด
+POST   /v1/prompts              สร้าง { name, content, description? }
+GET    /v1/prompts/:name        ดึงเฉพาะตัว
+PUT    /v1/prompts/:name        แก้ไข
+DELETE /v1/prompts/:name        ลบ
+```
+
+ใช้ใน chat:
+```json
+{ "model": "sml/auto", "prompt": "pirate", "messages": [{"role":"user","content":"how?"}] }
+```
+→ ระบบจะ prepend system prompt `pirate` ที่บันทึกไว้ให้อัตโนมัติ
+
+### 14. Dev Controls (X-SMLGateway-* headers)
+
+```
+X-SMLGateway-Prefer:      groq,cerebras       ดัน provider ขึ้นบน
+X-SMLGateway-Exclude:     mistral              ตัดออก
+X-SMLGateway-Max-Latency: 3000                 กรอง model ที่ช้าเกิน
+X-SMLGateway-Strategy:    fastest | strongest  preset sort
+```
+
+Response headers:
+```
+X-SMLGateway-Request-Id   ใช้กับ /v1/trace/:reqId
+X-SMLGateway-Provider     provider ที่ตอบจริง
+X-SMLGateway-Model        model ที่ตอบจริง
+X-SMLGateway-Hedge        true ถ้าชนะจาก hedge
+X-SMLGateway-Cache        HIT ถ้าดึงจาก semantic cache
+X-Resceo-Backoff          true ถ้ายิงถี่เกิน soft limit (ไม่บล็อก, hint เท่านั้น)
+```
+
+---
+
 ## Smart Routing — วิธีที่ Proxy เลือก Model
 
 ```

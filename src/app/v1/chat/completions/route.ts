@@ -845,6 +845,25 @@ export async function POST(req: NextRequest) {
       return openAIError(400, { message: "model must be a string", param: "model" });
     }
 
+    // Prompt library lookup — body.prompt = "saved-prompt-name" prepends
+    // stored system prompt to the messages array. Silent no-op if not found.
+    if (typeof body.prompt === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(body.prompt)) {
+      try {
+        const sql = getSqlClient();
+        const rows = await sql<Array<{ content: string }>>`
+          SELECT content FROM prompts WHERE name = ${body.prompt}
+        `;
+        if (rows.length > 0) {
+          const existing = body.messages as Array<{ role: string; content: unknown }>;
+          const hasSystem = existing.length > 0 && existing[0].role === "system";
+          body.messages = hasSystem
+            ? [{ role: "system", content: rows[0].content + "\n\n" + String(existing[0].content) }, ...existing.slice(1)]
+            : [{ role: "system", content: rows[0].content }, ...existing];
+          sql`UPDATE prompts SET use_count = use_count + 1 WHERE name = ${body.prompt}`.catch(() => {});
+        }
+      } catch { /* non-critical */ }
+    }
+
     const modelField = (body.model as string) || "auto";
     const isStream = body.stream === true;
     const caps = detectRequestCapabilities(body);

@@ -215,6 +215,19 @@ export async function runMigrations(): Promise<void> {
     // Add request_id + client_ip for /v1/trace/:reqId + /api/my-stats endpoints
     await sql`ALTER TABLE gateway_logs ADD COLUMN IF NOT EXISTS request_id TEXT`;
     await sql`ALTER TABLE gateway_logs ADD COLUMN IF NOT EXISTS client_ip TEXT`;
+
+    // Prompt library — reusable system prompts
+    await sql`
+      CREATE TABLE IF NOT EXISTS prompts (
+        name         TEXT PRIMARY KEY,
+        content      TEXT NOT NULL,
+        description  TEXT,
+        use_count    INTEGER DEFAULT 0,
+        created_at   TIMESTAMPTZ DEFAULT now(),
+        updated_at   TIMESTAMPTZ DEFAULT now()
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_prompts_updated ON prompts(updated_at DESC)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_gateway_logs_req_id ON gateway_logs(request_id) WHERE request_id IS NOT NULL`;
     await sql`CREATE INDEX IF NOT EXISTS idx_gateway_logs_client_ip ON gateway_logs(client_ip, created_at DESC) WHERE client_ip IS NOT NULL`;
 

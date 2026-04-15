@@ -149,8 +149,14 @@ Trigger manual: `curl -X POST http://localhost:3334/api/worker`
 | `GET  /v1/models` | รายการโมเดลทั้งหมด (รวม virtual models) |
 | `GET  /v1/models/search` | ค้นหา/จัดอันดับ model ตาม category, context, tools ฯลฯ |
 | `POST /v1/compare` | ยิง prompt เดียวไปหลาย model พร้อมกัน (สูงสุด 10) |
+| `POST /v1/structured` | Chat + JSON schema validation + auto-retry ถ้า output ไม่ตรง |
 | `GET  /v1/trace/:reqId` | ดู log ของ request เดิม (จาก `X-SMLGateway-Request-Id` header) |
 | `GET  /api/my-stats?window=24h` | สรุปการใช้งานของ IP ตัวเอง (p50/p95/p99 + top models) |
+| `GET  /v1/prompts` | รายการ system prompts ที่บันทึกไว้ |
+| `POST /v1/prompts` | สร้าง/เขียนทับ prompt `{ name, content, description? }` |
+| `GET  /v1/prompts/:name` | ดึง prompt |
+| `PUT  /v1/prompts/:name` | แก้ไข |
+| `DELETE /v1/prompts/:name` | ลบ |
 | `POST /v1/completions` | legacy completion endpoint |
 | `POST /v1/embeddings` | embeddings (proxy ไป provider ที่รองรับ) |
 | `GET  /api/status` | health summary + counts |
