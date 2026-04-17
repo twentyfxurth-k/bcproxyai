@@ -408,8 +408,8 @@ export default function GuidePage() {
             Alibaba Qwen, Reka)
           </P>
           <P>
-            ระบบมี worker หลังบ้านคอย scan model ใหม่ ทดสอบ benchmark 25 ข้อ และเลือกครู
-            (teachers) ที่เก่งในแต่ละหมวดไว้เป็น grader ให้คะแนน model ตัวอื่น
+            ระบบมี worker หลังบ้านคอย scan model ใหม่ ทดสอบสอบวัดผลตามระดับที่ตั้งไว้
+            (ประถม/มัธยมต้น/มัธยมปลาย/มหาลัย) และเลือกครู (teachers) ที่เก่งในแต่ละหมวดไว้เป็น grader
           </P>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="bg-black/30 rounded-lg p-3 border border-white/5">
@@ -828,14 +828,24 @@ curl http://localhost:3334/v1/trace/5m3obi
           </ul>
           <SubTitle>วิธีคัดเลือก</SubTitle>
           <P>
-            ข้อสอบมี 25 ข้อ แบ่งเป็น 12 หมวด — ทุกรอบ worker (15 นาที) จะจัดสอบ model ใหม่
-            เก็บคะแนนลง <InlineCode>model_category_scores</InlineCode> แล้วเลือกครูอัตโนมัติ
+            ข้อสอบ 4 ระดับ (cumulative) — ทุกรอบ worker (15 นาที) จะจัดสอบ model ใหม่ตามระดับที่ตั้งไว้ใน{" "}
+            <InlineCode>worker_state.exam_level</InlineCode> เก็บคะแนนลง{" "}
+            <InlineCode>model_category_scores</InlineCode> แล้วเลือกครูอัตโนมัติ
             model เดียวสามารถเป็น head หลายหมวดได้ (คนเก่งหลายอย่าง)
           </P>
-          <SubTitle>เกณฑ์ผ่าน</SubTitle>
+          <ul className="list-none space-y-1 text-sm text-gray-300">
+            <li>&#128994; <strong>ประถม (primary)</strong> — 10 ข้อ, ผ่าน &ge; 70%</li>
+            <li>&#128993; <strong>มัธยมต้น (middle)</strong> — 19 ข้อ, ผ่าน &ge; 75%</li>
+            <li>&#128992; <strong>มัธยมปลาย (high)</strong> — 27 ข้อ, ผ่าน &ge; 80%</li>
+            <li>&#128308; <strong>มหาลัย (university)</strong> — 35 ข้อ, ผ่าน &ge; 85%</li>
+          </ul>
+          <SubTitle>เปลี่ยนระดับ + สั่งสอบใหม่</SubTitle>
           <P>
-            Model ต้องทำคะแนนรวม &ge; 85% ถึงจะเป็น <InlineCode>passed_exam = true</InlineCode>
-            และเกณฑ์ 50% ขึ้นไปถึงจะเข้า routing pool ได้
+            ตั้งค่าระดับใน dashboard section <strong>&#127962; ระดับสอบ</strong> (คลิกการ์ด → save อัตโนมัติ)
+            หรือ <InlineCode>POST /api/exam-config {`{ "level": "primary" }`}</InlineCode>.
+            สั่งสอบใหม่ทุกคน: ปุ่ม &ldquo;&#128260; สอบใหม่ทุกคน&rdquo; (กด 2 ครั้งยืนยัน) หรือ{" "}
+            <InlineCode>POST /api/exam-reset</InlineCode> — ล้าง <InlineCode>exam_attempts</InlineCode> +
+            <InlineCode>model_category_scores</InlineCode> แล้ว trigger worker ทันที
           </P>
         </Section>
 
