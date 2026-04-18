@@ -106,6 +106,7 @@ export default function Dashboard() {
     provider: string;
     envVar: string;
     hasKey: boolean;
+    hasDbKey: boolean;
     noKeyRequired: boolean;
     modelCount: number;
     availableCount: number;
@@ -310,8 +311,8 @@ export default function Dashboard() {
 
       <div className="w-full px-2 sm:px-3 py-3 space-y-3">
 
-        {/* ── First-run banner: ไม่มี API key เลย → บอกให้ Setup ก่อน ─── */}
-        {providerStatuses.length > 0 && providerStatuses.every((p) => !p.hasKey) && (
+        {/* ── First-run banner: ไม่มี API key ใน DB เลย → บอกให้ Setup ก่อน ─── */}
+        {providerStatuses.length > 0 && !providerStatuses.some((p) => p.hasDbKey) && (
           <section className="animate-fade-in-up">
             <div className="rounded-xl border-2 border-amber-500/40 bg-gradient-to-r from-amber-500/10 to-orange-500/10 p-5 shadow-lg shadow-amber-500/10">
               <div className="flex items-start gap-4 flex-wrap">
