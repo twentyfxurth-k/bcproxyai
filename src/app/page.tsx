@@ -34,7 +34,6 @@ import type {
 import { StatsCards } from "../components/StatsCards";
 import { ModelGrid } from "../components/ModelGrid";
 import { ChatPanel } from "../components/ChatPanel";
-import { SetupModal } from "../components/SetupModal";
 import { SpeedRace } from "../components/SpeedRace";
 import { Analytics } from "../components/Analytics";
 import type { AnalyticsData } from "../components/Analytics";
@@ -65,7 +64,6 @@ export default function Dashboard() {
   const [triggering, setTriggering] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [, setTick] = useState(0);
-  const [showSetup, setShowSetup] = useState(false);
 
   interface GatewayLog {
     id: number;
@@ -233,8 +231,8 @@ export default function Dashboard() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowSetup(true)}
+              <a
+                href="/setup"
                 className="px-3 py-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors text-xs"
                 title="ตั้งค่า API Key"
               >
@@ -243,7 +241,7 @@ export default function Dashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
                 Setup
-              </button>
+              </a>
               <a
                 href="/guide"
                 target="_blank"
@@ -335,12 +333,12 @@ export default function Dashboard() {
                     </a>
                   </div>
                 </div>
-                <button
-                  onClick={() => setShowSetup(true)}
-                  className="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold text-sm shadow-lg shadow-amber-500/30 transition-all whitespace-nowrap"
+                <a
+                  href="/setup"
+                  className="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold text-sm shadow-lg shadow-amber-500/30 transition-all whitespace-nowrap inline-block"
                 >
                   ⚙️ ใส่ API key ตอนนี้
-                </button>
+                </a>
               </div>
             </div>
           </section>
@@ -708,7 +706,7 @@ export default function Dashboard() {
                 <div
                   key={p.provider}
                   className={`glass rounded-xl p-4 border ${statusConfig.border} ${statusConfig.bg} hover:scale-[1.02] transition-transform cursor-pointer`}
-                  onClick={() => { if (p.status !== "active") setShowSetup(true); }}
+                  onClick={() => { if (p.status !== "active") window.location.href = "/setup"; }}
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <ProviderBadge provider={p.provider} />
@@ -1127,9 +1125,6 @@ export default function Dashboard() {
       </div>
 
       {/* ── Guide Modal ──────────────────────────────────────────────────── */}
-
-      {/* ── Setup Modal ──────────────────────────────────────────────────── */}
-      <SetupModal open={showSetup} onClose={() => setShowSetup(false)} />
 
       {/* ── Log Detail Modal ─────────────────────────────────────────────── */}
       {logDetail && (
