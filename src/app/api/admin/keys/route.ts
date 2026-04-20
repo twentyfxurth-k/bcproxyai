@@ -1,22 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "../../../../../auth";
 import { createKey, listKeys } from "@/lib/gateway-keys";
-import { isOwnerEmail, hasOwners } from "@/lib/admin-emails";
 
 export const dynamic = "force-dynamic";
 
-// Owner-only guard. Middleware already blocks `/api/*` for non-owners in prod,
-// but local dev (no owners configured) bypasses middleware — so we re-check.
-async function requireOwner() {
-  if (!hasOwners()) return null; // local: open
-  const session = await auth();
-  if (isOwnerEmail(session?.user?.email)) return null;
-  return NextResponse.json({ error: "owner only" }, { status: 403 });
+// Admin endpoints are gated in middleware (master Bearer key only).
+// No session/OAuth — this handler only needs to read who's calling for audit.
+
+function callerFromHeader(req: NextRequest): string | null {
+  const h = req.headers.get("authorization") ?? "";
+  if (!h.startsWith("Bearer ")) return null;
+  const key = h.slice(7).trim();
+  return key ? `key:${key.slice(0, 10)}…` : null;
 }
 
 export async function GET() {
-  const denied = await requireOwner();
-  if (denied) return denied;
   try {
     const keys = await listKeys();
     return NextResponse.json(keys);
@@ -26,16 +23,13 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = await requireOwner();
-  if (denied) return denied;
   try {
     const body = await req.json();
     const { label, expiresAt, notes } = body as { label?: string; expiresAt?: string; notes?: string };
     if (!label || typeof label !== "string" || label.trim().length === 0) {
       return NextResponse.json({ error: "label required" }, { status: 400 });
     }
-    const session = await auth();
-    const createdBy = session?.user?.email ?? null;
+    const createdBy = callerFromHeader(req);
     const created = await createKey({
       label: label.trim().slice(0, 80),
       createdBy: createdBy ?? undefined,
@@ -47,7 +41,7 @@ export async function POST(req: NextRequest) {
       id: created.id,
       keyPrefix: created.keyPrefix,
       label: created.label,
-      plaintext: created.plaintext, // shown ONCE
+      plaintext: created.plaintext,
       createdAt: created.createdAt,
       expiresAt: created.expiresAt,
     });

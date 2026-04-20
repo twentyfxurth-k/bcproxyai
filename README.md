@@ -9,16 +9,16 @@
 
 | | **Local** (default) | **Server** (public) |
 |---|---|---|
-| Auth | 🚫 off — open endpoint | ✅ Google OAuth UI + Bearer API keys |
+| Auth | 🚫 off — open endpoint | ✅ Bearer API key only (no OAuth / login) |
 | Use case | Docker Desktop, single dev | Droplet / VPS, shared team / public |
-| `AUTH_OWNER_EMAIL` | unset | set |
-| `GATEWAY_API_KEY` | unset | set |
-| Client sends | `api_key: "dummy"` | `api_key: "sml_live_..."` |
-| Admin UI | — | `/admin/keys` — issue per-client keys |
+| Client sends | `api_key: "dummy"` | `api_key: "sk-gw-..."` หรือ `"sml_live_..."` |
+| Admin UI `/admin/keys` | เปิด | เปิด — ใส่ master key ใน prompt |
 
-**Mode switches automatically** จาก `.env.local`:
-- ถ้าไม่ตั้ง `AUTH_OWNER_EMAIL` / `GATEWAY_API_KEY` → **local mode** (no auth, open endpoint)
-- ถ้าตั้งอย่างน้อย 1 ตัว → **server mode** (auth enforced, `/v1/*` owner-only)
+**Mode switch อัตโนมัติ** จาก `.env.local`:
+- ถ้าไม่ตั้ง `GATEWAY_API_KEY` และ `AUTH_OWNER_EMAIL` → **local mode** (no auth)
+- ถ้าตั้งอย่างน้อย 1 ตัว → **server mode** (Bearer key enforced บน `/v1/*` + `/api/admin/*`)
+
+**ไม่มี Google OAuth ไม่มีหน้า login** — ทุกอย่างเป็น Bearer key. Email ใน `AUTH_OWNER_EMAIL` เป็นแค่ metadata (แสดงใน UI + audit `created_by`).
 
 ดูรายละเอียดทุกตัวแปรใน [.env.example](.env.example).
 
@@ -34,7 +34,7 @@
 |---|---|
 | 🆓 Free-only | 30+ providers (free tier เท่านั้น — paid ถูกกรองออก), 200+ models |
 | 🇹🇭 Thai-native | Typhoon (SCB 10X) เป็น provider ตัวแรก + virtual model `sml/thai` |
-| 🔐 Dual auth | local = no auth; server = OAuth + Bearer key (admin ออก key ได้ที่ `/admin/keys`) |
+| 🔐 Bearer-only auth | local = no auth; server = Bearer key (ไม่มี OAuth). Admin ออก key รายตัวที่ `/admin/keys` |
 | 🔎 Auto-verify | probe homepage + `/v1/models` ของทุก provider ทุก 3 นาที + sync URL ใหม่จาก cheahjs/LiteLLM registry ทุก 6 ชม. |
 | 🌐 Auto-Discovery | สแกน OpenRouter/HuggingFace/URL pattern หา provider ใหม่ทุก 15 นาที (กรอง paid ทิ้ง) |
 | ⚡ Fast | hedge top-3, warmup, semantic cache → p50 ~500ms |
@@ -91,31 +91,28 @@ curl -X POST http://localhost:3334/v1/chat/completions \
 ```
 
 ### เปิดโหมด Server (public deploy)
-ใน `.env.local` ตั้งค่า 5 ตัว:
+ใน `.env.local` ตั้งแค่ **2 ตัว**:
 ```bash
-# Single admin
-AUTH_OWNER_EMAIL=you@gmail.com
-# หรือหลาย admin (คั่น comma)
-# AUTH_OWNER_EMAIL=you@gmail.com,teammate@gmail.com,cto@gmail.com
+# Master Bearer key — สร้างด้วย:
+#   node -e "console.log('sk-gw-' + require('crypto').randomBytes(32).toString('hex'))"
 GATEWAY_API_KEY=sk-gw-<32-byte-hex>
-NEXTAUTH_SECRET=<base64 32 bytes>
-NEXTAUTH_URL=https://your-domain.example.com
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-```
-Restart → `/v1/*` จะเปิดเฉพาะสำหรับ:
-- Bearer `GATEWAY_API_KEY` (master)
-- Bearer `sml_live_*` (admin ออกให้ client ที่ `/admin/keys`)
-- Owner Google login (UI อย่างเดียว)
 
-**เพิ่ม/ลบ admin ภายหลัง:** แก้ `AUTH_OWNER_EMAIL` ใน `.env.production` บน droplet → restart
+# Owner email (metadata — แสดงใน UI, ใช้ audit, ไม่มีผลกับ auth)
+# ใส่หลาย admin คั่น comma ได้:
+AUTH_OWNER_EMAIL=you@gmail.com,teammate@gmail.com
+```
+Restart → `/v1/*` + `/api/admin/*` จะต้องใช้ Bearer key:
+- `sk-gw-...` (master) — เต็มสิทธิ์ (รวม `/api/admin/*`)
+- `sml_live_...` (admin-issued) — เฉพาะ `/v1/*` (ออกได้ที่ `/admin/keys`)
+
+หน้า UI (dashboard / setup / guide) **เปิดให้เข้าเอง ไม่ต้อง login** — `/admin/keys` จะถาม master key ตอนเปิด (เก็บใน sessionStorage ของ browser)
+
+**เพิ่ม/ลบ admin ภายหลัง:** แก้ `AUTH_OWNER_EMAIL` → restart
 ```bash
 ssh root@your-droplet
 nano /opt/sml-gateway/.env.production
 bash /opt/sml-gateway/scripts/deploy-droplet.sh
 ```
-
-ดูรายละเอียด 3 ระดับสิทธิ์ + วิธีออก API key ให้ client ที่ [/guide#auth](https://your-domain/guide#auth)
 
 **Worker cycles ที่รันอัตโนมัติ:**
 

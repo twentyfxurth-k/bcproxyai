@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { auth } from "../auth";
 import { verifyKey as verifyGatewayKey } from "@/lib/gateway-keys";
-import { isOwnerEmail, hasOwners } from "@/lib/admin-emails";
+import { hasOwners } from "@/lib/admin-emails";
 
+// Auth model (kept as simple as possible — no browser OAuth):
+//   • Local mode   = GATEWAY_API_KEY unset AND AUTH_OWNER_EMAIL unset → open
+//   • Server mode  = either is set → Bearer required on /v1/* + /api/admin/*
+//
+// Three kinds of Bearer tokens are accepted:
+//   1. GATEWAY_API_KEY env   — master key (full access, incl. /api/admin/*)
+//   2. sml_live_* from DB    — admin-issued (only /v1/*)
+//   3. (none)                — pages + GET /api/* that aren't /v1/* are open
 const API_KEY = process.env.GATEWAY_API_KEY?.trim() ?? "";
 const AUTH_ENABLED = Boolean(API_KEY || hasOwners());
 
@@ -29,64 +36,44 @@ export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const method = req.method.toUpperCase();
 
+  // Always open
   if (pathname === "/api/health") return NextResponse.next();
-  if (pathname.startsWith("/api/auth/")) return NextResponse.next();
-  if (pathname === "/login") return NextResponse.next();
 
-  const isApiRoute = pathname.startsWith("/api/") || pathname.startsWith("/v1/");
   const isV1Route = pathname.startsWith("/v1/");
-  const isMutation = MUTATING_METHODS.has(method);
+  const isAdminApi = pathname.startsWith("/api/admin/");
+  const isMutatingApi = pathname.startsWith("/api/") && MUTATING_METHODS.has(method);
 
   const authHeader = req.headers.get("authorization") ?? "";
   const presented = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  if (presented) {
-    // 1) Master env key (ops/deploy)
-    if (API_KEY && timingSafeEqual(presented, API_KEY)) {
-      return NextResponse.next();
-    }
-    // 2) Admin-issued DB keys (created via /admin/keys UI)
-    if (presented.startsWith("sml_live_")) {
-      const valid = await verifyGatewayKey(presented);
-      if (valid) return NextResponse.next();
-    }
-    if (isApiRoute) {
-      return json({ error: { message: "invalid api key", type: "auth_error" } }, 401);
-    }
+
+  const isMaster = Boolean(presented && API_KEY && timingSafeEqual(presented, API_KEY));
+  const isAdminIssued =
+    Boolean(presented && presented.startsWith("sml_live_")) &&
+    (await verifyGatewayKey(presented));
+
+  // /api/admin/* → master only
+  if (isAdminApi) {
+    if (isMaster) return NextResponse.next();
+    return json({ error: { message: "admin: master key required", type: "auth_error" } }, 401);
   }
 
-  const session = await auth();
-  const email = session?.user?.email ?? "";
-  const isOwner = isOwnerEmail(email);
-  const isViewer = Boolean(session?.user && !isOwner);
-
-  if (isOwner) return NextResponse.next();
-
-  if (isViewer) {
-    if (isV1Route) {
-      return json(
-        { error: { message: "forbidden: chat completions are owner-only", type: "permission_error" } },
-        403
-      );
-    }
-    if (isApiRoute && isMutation) {
-      return json(
-        { error: { message: "forbidden: read-only access", type: "permission_error" } },
-        403
-      );
-    }
-    return NextResponse.next();
-  }
-
-  if (isApiRoute) {
+  // /v1/* → master or sml_live_*
+  if (isV1Route) {
+    if (isMaster || isAdminIssued) return NextResponse.next();
     return json(
-      { error: { message: "authentication required", type: "auth_error" } },
-      401
+      { error: { message: presented ? "invalid api key" : "authentication required", type: "auth_error" } },
+      401,
     );
   }
 
-  const loginUrl = new URL("/login", req.nextUrl);
-  loginUrl.searchParams.set("callbackUrl", pathname + req.nextUrl.search);
-  return NextResponse.redirect(loginUrl);
+  // Mutating /api/* (setup, etc) → master only; GET /api/* is open for the UI
+  if (isMutatingApi) {
+    if (isMaster) return NextResponse.next();
+    return json({ error: { message: "admin: master key required", type: "auth_error" } }, 401);
+  }
+
+  // All pages + GET /api/* are open — UI is meant to be viewable.
+  return NextResponse.next();
 }
 
 export const config = {

@@ -580,81 +580,59 @@ docker volume rm sml-gateway_sml-gateway-data
 docker compose up -d --build`}</Code>
         </Section>
 
-        <Section id="auth" icon="&#128274;" title="การยืนยันตัวตน (Auth)">
+        <Section id="auth" icon="&#128274;" title="การยืนยันตัวตน (Bearer key only)">
           <P>
-            ระบบ switch auto ระหว่าง <strong>Local mode</strong> (ไม่มี auth) และ <strong>Server mode</strong>{" "}
-            (OAuth + Bearer key) ตามตัวแปรใน <InlineCode>.env.local</InlineCode>
+            <strong>ไม่มีระบบ login, ไม่มี Google OAuth</strong> — ใช้แค่ Bearer API key อย่างเดียว.
+            หน้า UI (dashboard, setup, guide) เปิดให้ทุกคนเข้าดูได้.
+            เฉพาะ endpoint ที่ใช้ quota (<InlineCode>/v1/*</InlineCode>) และ admin (<InlineCode>/api/admin/*</InlineCode>) ที่ต้องใช้ key
           </P>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-white/10 text-gray-400 text-xs uppercase">
-                  <th className="text-left py-2 pr-4"></th>
-                  <th className="text-left py-2 pr-4">Local (default)</th>
-                  <th className="text-left py-2">Server (public)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5 text-xs">
-                <tr><td className="py-2 pr-4 font-bold">Auth</td><td className="py-2 pr-4 text-emerald-300">ปิด — open endpoint</td><td className="py-2 text-amber-300">Google OAuth + Bearer</td></tr>
-                <tr><td className="py-2 pr-4 font-bold">Client ส่ง</td><td className="py-2 pr-4"><InlineCode>api_key: &ldquo;dummy&rdquo;</InlineCode></td><td className="py-2"><InlineCode>api_key: &ldquo;sml_live_...&rdquo;</InlineCode></td></tr>
-                <tr><td className="py-2 pr-4 font-bold">Trigger</td><td className="py-2 pr-4">ไม่ตั้ง env auth</td><td className="py-2">ตั้ง <InlineCode>AUTH_OWNER_EMAIL</InlineCode> หรือ <InlineCode>GATEWAY_API_KEY</InlineCode></td></tr>
-              </tbody>
-            </table>
-          </div>
+          <SubTitle>ตั้งค่า Server mode — 2 ตัว</SubTitle>
+          <Code>{`# .env.local (หรือ .env.production บน droplet)
 
-          <SubTitle>ตั้งค่า Server mode</SubTitle>
-          <P>แก้ <InlineCode>.env.local</InlineCode> (local) หรือ <InlineCode>.env.production</InlineCode> (droplet):</P>
-          <Code>{`# Admin email(s) — หลาย admin คั่นด้วย comma, semicolon, หรือ whitespace
-AUTH_OWNER_EMAIL=jead@gmail.com,alice@gmail.com,bob@gmail.com
-
-# Master Bearer key (เหมือน owner ทุกประการ — ใช้ใน CI / automation)
-# generate: node -e "console.log('sk-gw-' + require('crypto').randomBytes(32).toString('hex'))"
+# Master Bearer key — สร้างด้วย:
+#   node -e "console.log('sk-gw-' + require('crypto').randomBytes(32).toString('hex'))"
 GATEWAY_API_KEY=sk-gw-...
 
-# NextAuth JWT signing secret
-# generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-NEXTAUTH_SECRET=...
+# Owner email(s) — metadata เฉยๆ (แสดงใน UI, ใช้ audit) ไม่ได้มีผลกับ auth
+# หลาย admin คั่นด้วย comma / semicolon / ช่องว่าง:
+AUTH_OWNER_EMAIL=jead@gmail.com,alice@gmail.com,bob@gmail.com`}</Code>
+          <Info>
+            ถ้าไม่ใส่ทั้ง 2 ตัว → <strong>Local mode</strong> (ทุกอย่างเปิด ไม่ต้องใช้ key) —
+            เหมาะสำหรับ Docker Desktop ในเครื่องตัวเอง
+          </Info>
 
-NEXTAUTH_URL=https://your-domain.example.com
-
-# Google OAuth client (https://console.cloud.google.com/apis/credentials)
-# redirect URI: {NEXTAUTH_URL}/api/auth/callback/google
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...`}</Code>
-
-          <SubTitle>3 ระดับสิทธิ์ใน Server mode</SubTitle>
+          <SubTitle>2 ชนิดของ Bearer key</SubTitle>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-white/10 text-gray-400 text-xs uppercase">
-                  <th className="text-left py-2 pr-4">ใคร</th>
+                  <th className="text-left py-2 pr-4">Key</th>
                   <th className="text-left py-2 pr-4">/v1/*</th>
                   <th className="text-left py-2 pr-4">/api/admin/*</th>
-                  <th className="text-left py-2">UI</th>
+                  <th className="text-left py-2">ที่มา</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-xs">
-                <tr><td className="py-2 pr-4">Bearer <InlineCode>GATEWAY_API_KEY</InlineCode> (master)</td><td className="py-2 pr-4 text-emerald-300">✅</td><td className="py-2 pr-4 text-red-300">❌</td><td className="py-2 text-gray-500">—</td></tr>
-                <tr><td className="py-2 pr-4">Bearer <InlineCode>sml_live_*</InlineCode> (admin-issued)</td><td className="py-2 pr-4 text-emerald-300">✅</td><td className="py-2 pr-4 text-red-300">❌</td><td className="py-2 text-gray-500">—</td></tr>
-                <tr><td className="py-2 pr-4">Owner (email ใน <InlineCode>AUTH_OWNER_EMAIL</InlineCode>)</td><td className="py-2 pr-4 text-emerald-300">✅</td><td className="py-2 pr-4 text-emerald-300">✅</td><td className="py-2 text-emerald-300">✅</td></tr>
-                <tr><td className="py-2 pr-4">Viewer (Google อื่นๆ)</td><td className="py-2 pr-4 text-red-300">❌</td><td className="py-2 pr-4 text-red-300">❌</td><td className="py-2 text-amber-300">read-only</td></tr>
-                <tr><td className="py-2 pr-4">ไม่ login</td><td className="py-2 pr-4 text-red-300">❌</td><td className="py-2 pr-4 text-red-300">❌</td><td className="py-2 text-red-300">redirect /login</td></tr>
+                <tr><td className="py-2 pr-4"><InlineCode>sk-gw-...</InlineCode> (master)</td><td className="py-2 pr-4 text-emerald-300">✅</td><td className="py-2 pr-4 text-emerald-300">✅</td><td className="py-2">ตั้งใน .env</td></tr>
+                <tr><td className="py-2 pr-4"><InlineCode>sml_live_...</InlineCode></td><td className="py-2 pr-4 text-emerald-300">✅</td><td className="py-2 pr-4 text-red-300">❌</td><td className="py-2">admin ออกที่ /admin/keys</td></tr>
               </tbody>
             </table>
           </div>
 
-          <SubTitle>Admin ออก API key ให้ client</SubTitle>
+          <SubTitle>Admin ออก key ให้ client</SubTitle>
           <P>
             เข้า <a href="/admin/keys" className="text-indigo-300 hover:underline">/admin/keys</a>{" "}
-            (owner only) → กรอก label + optional expiry → กด <strong>+ สร้าง key</strong> → แสดง plaintext ครั้งเดียว (คัดลอก/ส่งให้ client)
+            → ถ้าเป็นครั้งแรก ระบบจะ prompt ให้ใส่ <InlineCode>sk-gw-...</InlineCode> (master key)
+            → key เก็บใน sessionStorage ของ browser (ปิด tab = ต้องใส่ใหม่) → กรอก label → กด <strong>+ สร้าง key</strong>
+            → แสดง <InlineCode>sml_live_...</InlineCode> ครั้งเดียว (คัดลอกส่งให้ client)
           </P>
           <P>
-            Key เก็บใน DB เป็น SHA-256 hash — ดูย้อนหลังไม่ได้, ลบ/ปิดได้รายตัว, audit มี <InlineCode>last_used_at</InlineCode>
+            Key เก็บใน DB เป็น SHA-256 hash — ดูย้อนหลังไม่ได้, revoke/pause ได้รายตัว, มี <InlineCode>last_used_at</InlineCode>
           </P>
 
           <Info>
-            <strong>เพิ่ม admin ใหม่</strong> — แก้ <InlineCode>AUTH_OWNER_EMAIL</InlineCode> เพิ่ม email แล้ว restart container
+            <strong>เพิ่ม admin email ใหม่</strong> — แก้ <InlineCode>AUTH_OWNER_EMAIL</InlineCode> ใน <InlineCode>.env</InlineCode> → restart container
             <br />
             <span className="text-xs">ssh droplet → <InlineCode>nano /opt/sml-gateway/.env.production</InlineCode> → <InlineCode>bash scripts/deploy-droplet.sh</InlineCode></span>
           </Info>

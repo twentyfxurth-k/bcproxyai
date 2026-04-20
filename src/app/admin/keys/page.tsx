@@ -24,12 +24,27 @@ interface CreatedKey {
   expiresAt: string | null;
 }
 
+const BEARER_KEY_STORAGE = "smlg.admin.bearer";
+
+function bearerHeader(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const k = sessionStorage.getItem(BEARER_KEY_STORAGE);
+  return k ? { Authorization: `Bearer ${k}` } : {};
+}
+
 export default function AdminKeysPage() {
   const [keys, setKeys] = useState<KeyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiBase, setApiBase] = useState("https://your-server/v1");
+  const [bearerInput, setBearerInput] = useState("");
+  const [authed, setAuthed] = useState(false);
+  const [authErr, setAuthErr] = useState<string | null>(null);
   useEffect(() => {
     if (typeof window !== "undefined") setApiBase(`${window.location.origin}/v1`);
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (sessionStorage.getItem(BEARER_KEY_STORAGE)) setAuthed(true);
   }, []);
   const [label, setLabel] = useState("");
   const [neverExpires, setNeverExpires] = useState(true);
@@ -40,14 +55,38 @@ export default function AdminKeysPage() {
   const [copied, setCopied] = useState(false);
 
   const fetchKeys = useCallback(() => {
-    fetch("/api/admin/keys")
-      .then((r) => r.json())
+    if (!authed) { setLoading(false); return; }
+    fetch("/api/admin/keys", { headers: bearerHeader() })
+      .then(async (r) => {
+        if (r.status === 401) {
+          sessionStorage.removeItem(BEARER_KEY_STORAGE);
+          setAuthed(false);
+          setAuthErr("key ผิด — ลองใหม่");
+          return null;
+        }
+        return r.json();
+      })
       .then((d) => { if (Array.isArray(d)) setKeys(d); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [authed]);
 
   useEffect(() => { fetchKeys(); }, [fetchKeys]);
+
+  const handleAuth = () => {
+    const k = bearerInput.trim();
+    if (!k) return;
+    sessionStorage.setItem(BEARER_KEY_STORAGE, k);
+    setAuthed(true);
+    setAuthErr(null);
+    setBearerInput("");
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem(BEARER_KEY_STORAGE);
+    setAuthed(false);
+    setKeys([]);
+  };
 
   const handleCreate = async () => {
     if (!label.trim()) return;
@@ -55,7 +94,7 @@ export default function AdminKeysPage() {
     try {
       const res = await fetch("/api/admin/keys", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...bearerHeader() },
         body: JSON.stringify({
           label: label.trim(),
           expiresAt: neverExpires ? undefined : (expiresAt || undefined),
@@ -82,14 +121,14 @@ export default function AdminKeysPage() {
 
   const handleRevoke = async (id: number, label: string) => {
     if (!confirm(`ยกเลิก key "${label}" (id=${id})? \nผู้ถือ key จะใช้งานไม่ได้ทันที`)) return;
-    await fetch(`/api/admin/keys/${id}`, { method: "DELETE" });
+    await fetch(`/api/admin/keys/${id}`, { method: "DELETE", headers: bearerHeader() });
     fetchKeys();
   };
 
   const handleToggle = async (id: number, enabled: boolean) => {
     await fetch(`/api/admin/keys/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...bearerHeader() },
       body: JSON.stringify({ enabled: !enabled }),
     });
     fetchKeys();
@@ -111,10 +150,41 @@ export default function AdminKeysPage() {
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
           <Link href="/" className="text-indigo-300 hover:text-white text-sm">&larr; Dashboard</Link>
           <h1 className="text-lg font-bold">🔑 API Keys (Admin)</h1>
-          <span className="ml-auto text-xs text-amber-300 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/30">Owner only</span>
+          <span className="ml-auto text-xs text-amber-300 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/30">Master key</span>
+          {authed && (
+            <button onClick={handleLogout} className="text-[11px] text-gray-400 hover:text-white">ออก</button>
+          )}
         </div>
       </header>
 
+      {!authed ? (
+        <main className="max-w-md mx-auto px-4 py-12 space-y-4">
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+            <div className="text-sm font-bold">🔐 ใส่ Master Key</div>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              หน้านี้ต้องใช้ <code className="text-amber-300">GATEWAY_API_KEY</code> จาก <code>.env</code> ของเซิร์ฟเวอร์
+              — key จะถูกเก็บเฉพาะใน sessionStorage ของ browser (ออกจาก tab = ต้องใส่ใหม่)
+            </p>
+            <input
+              type="password"
+              value={bearerInput}
+              onChange={(e) => setBearerInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleAuth(); }}
+              placeholder="sk-gw-..."
+              className="w-full font-mono text-sm bg-gray-900/80 border border-white/10 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500/50"
+              autoFocus
+            />
+            <button
+              onClick={handleAuth}
+              disabled={!bearerInput.trim()}
+              className="w-full px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              เข้าสู่ระบบ
+            </button>
+            {authErr && <div className="text-xs text-red-300">✗ {authErr}</div>}
+          </div>
+        </main>
+      ) : (
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         {/* One-time reveal banner */}
         {created && (
@@ -270,6 +340,7 @@ curl ${apiBase}/chat/completions \\
           )}
         </section>
       </main>
+      )}
     </div>
   );
 }

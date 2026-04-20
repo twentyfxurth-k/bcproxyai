@@ -1,20 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "../../../../../../auth";
 import { revokeKey, setEnabled, invalidateVerifyCache } from "@/lib/gateway-keys";
-import { isOwnerEmail, hasOwners } from "@/lib/admin-emails";
 
 export const dynamic = "force-dynamic";
 
-async function requireOwner() {
-  if (!hasOwners()) return null;
-  const session = await auth();
-  if (isOwnerEmail(session?.user?.email)) return null;
-  return NextResponse.json({ error: "owner only" }, { status: 403 });
-}
+// Middleware already enforces master-Bearer on /api/admin/* — no extra check.
 
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const denied = await requireOwner();
-  if (denied) return denied;
   const { id } = await ctx.params;
   const n = Number(id);
   if (!Number.isInteger(n) || n <= 0) {
@@ -30,8 +21,6 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
 }
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const denied = await requireOwner();
-  if (denied) return denied;
   const { id } = await ctx.params;
   const n = Number(id);
   if (!Number.isInteger(n) || n <= 0) {
