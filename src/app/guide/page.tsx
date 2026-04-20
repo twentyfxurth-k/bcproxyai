@@ -541,6 +541,48 @@ export default function GuidePage() {
 openrouter/qwen/qwen3-coder:free
 cerebras/qwen-3-235b-a22b-instruct-2507
 mistral/mistral-large-2411`}</Code>
+
+          <SubTitle>🇹🇭 Thai-native models (ของคนไทย)</SubTitle>
+          <P>2 providers ฟรี — สมัครที่ <a href="/setup" className="text-indigo-300 hover:underline">/setup</a> แล้วเรียกตรงๆ:</P>
+          <Code>{`# Typhoon (SCB 10X) — sign up: https://opentyphoon.ai
+typhoon/typhoon-v2.5-30b-a3b-instruct
+
+# ThaiLLM (NSTDA national platform) — sign up: https://playground.thaillm.or.th
+# 4 โมเดลของคนไทยใต้ endpoint เดียว:
+thaillm/OpenThaiGPT-ThaiLLM-8B-Instruct-v7.2     # AIEAT
+thaillm/Typhoon-S-ThaiLLM-8B-Instruct            # SCB 10X
+thaillm/Pathumma-ThaiLLM-qwen3-8b-think-3.0.0    # NECTEC — มี thinking!
+thaillm/THaLLE-0.2-ThaiLLM-8B-fa                 # KBTG`}</Code>
+
+          <SubTitle>🧠 Thinking / Reasoning Mode</SubTitle>
+          <P>
+            Gateway <strong>auto-enable</strong> สำหรับ model ที่ scan แล้วพบว่ารองรับ reasoning
+            (เก็บใน <InlineCode>models.supports_reasoning</InlineCode>):
+          </P>
+          <ul className="text-sm text-gray-300 list-disc pl-6 space-y-1">
+            <li><strong>Source 1:</strong> OpenRouter metadata <InlineCode>supported_parameters</InlineCode> includes <InlineCode>reasoning</InlineCode></li>
+            <li><strong>Source 2:</strong> regex จับชื่อ model — <InlineCode>qwen3 / o1 / o3 / o4 / deepseek-r1 / thinking / magistral / pathumma-think / lfm-thinking</InlineCode></li>
+          </ul>
+
+          <P>เวลายิง gateway จะใส่ให้เอง:</P>
+          <Code>{`{
+  "reasoning": { "effort": "medium" },     // OpenRouter / Anthropic / OpenAI o-series
+  "enable_thinking": true,                  // Qwen3 / DashScope / vLLM
+  "max_tokens": 2000                        // เผื่อพื้นที่ trace
+}`}</Code>
+
+          <P><strong>Opt-out</strong> (ถ้าไม่อยากให้ thinking):</P>
+          <Code>{`{
+  "model": "thaillm/Pathumma-ThaiLLM-qwen3-8b-think-3.0.0",
+  "messages": [...],
+  "reasoning": false      // หรือ "enable_thinking": false
+}`}</Code>
+
+          <Info>
+            <strong>ดูใน &ldquo;สมุดจดงาน&rdquo;</strong> — log exam ที่ใช้ thinking mode จะมี 🧠 tag กำกับ:
+            <br />
+            <code>📝 เริ่มสอบ [middle] 🧠 thinking: thaillm/Pathumma-ThaiLLM-qwen3-8b-think-3.0.0</code>
+          </Info>
         </Section>
 
         <Section id="install" icon="&#128230;" title="ติดตั้ง">

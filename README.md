@@ -65,7 +65,8 @@ NEXTAUTH_URL=https://your-domain.com
 | | |
 |---|---|
 | 🆓 Free-only | 33 providers (free tier เท่านั้น — paid ถูกกรองออก), 220+ models |
-| 🇹🇭 Thai-native | Typhoon (SCB 10X) เป็น provider ตัวแรก + virtual model `sml/thai` |
+| 🇹🇭 Thai-native | Typhoon (SCB 10X) + ThaiLLM (NSTDA national platform — 4 models: OpenThaiGPT, Typhoon-S, Pathumma-think, THaLLE) + virtual `sml/thai` |
+| 🧠 Thinking mode | auto-detect จาก OpenRouter metadata + name regex → scan flag → exam ใช้ `reasoning.effort` + `enable_thinking` → gateway forward path auto-enable (opt-out via body) |
 | 🔐 3 auth methods | Local (open) / Password cookie / Google OAuth — เลือกได้ตาม env, ใช้คู่ได้. Per-client key ออกที่ `/admin/keys` |
 | 🔎 Auto-verify | probe homepage + `/v1/models` ของทุก provider ทุก 3 นาที + sync URL ใหม่จาก cheahjs/LiteLLM registry ทุก 6 ชม. |
 | 🌐 Auto-Discovery | สแกน OpenRouter/HuggingFace/URL pattern หา provider ใหม่ทุก 15 นาที (กรอง paid ทิ้ง) |
@@ -261,6 +262,41 @@ Trigger manual: `curl -X POST http://localhost:3334/api/worker`
 | `sml/consensus` | ยิงไปหลายโมเดลแล้วเลือกคำตอบที่ตรงกันมากสุด |
 
 เรียก model ตรงได้เหมือนเดิม — ใส่ `modelId` ของ provider เช่น `groq/llama-3.3-70b-versatile`
+
+**Thai LLM shortcuts** (ต้องใส่ key ของแต่ละ provider ที่ `/setup`):
+```
+typhoon/typhoon-v2.5-30b-a3b-instruct
+thaillm/OpenThaiGPT-ThaiLLM-8B-Instruct-v7.2
+thaillm/Typhoon-S-ThaiLLM-8B-Instruct
+thaillm/Pathumma-ThaiLLM-qwen3-8b-think-3.0.0     ← มี reasoning mode
+thaillm/THaLLE-0.2-ThaiLLM-8B-fa
+```
+
+## 🧠 Thinking / Reasoning Mode
+
+Auto-detect + auto-enable — user ไม่ต้องส่ง param เอง
+
+**การตรวจจับ** (stored ที่ `models.supports_reasoning`):
+1. **Primary:** OpenRouter metadata `supported_parameters` มี `reasoning` / `include_reasoning` / `reasoning_effort`
+2. **Fallback:** regex จับ keyword ที่ model id (`qwen3`, `o1`/`o3`/`o4`, `deepseek-r1`, `thinking`, `magistral`, `pathumma-think`, `lfm-thinking`, ฯลฯ)
+
+**การใช้งาน** — gateway ใส่ให้อัตโนมัติ:
+```json
+{
+  "reasoning": { "effort": "medium" },   // OpenRouter / Anthropic style
+  "enable_thinking": true,                 // Qwen3 / DashScope style
+  "max_tokens": 2000
+}
+```
+
+**Opt-out** (ถ้าอยาก disable สำหรับ request นี้):
+```json
+{ "model": "thaillm/Pathumma-ThaiLLM-qwen3-8b-think-3.0.0",
+  "messages": [...],
+  "reasoning": false }
+```
+
+**สังเกตใน dashboard** — สมุดจดงานมี 🧠 tag บน exam ที่รันกับ reasoning model
 
 ---
 
