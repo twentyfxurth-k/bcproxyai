@@ -1,0 +1,38 @@
+name: sml-gateway
+
+# Production overlay — use together with the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Differences vs. local:
+#   - Caddy binds to host 8335 instead of 3334 (the existing Caddy on the
+#     droplet listens on 80/443, and reverse-proxies to localhost:8335).
+#   - Postgres/Redis do NOT expose ports to the host (internal network only).
+#   - Env comes from .env.production instead of .env.local.
+#   - Ollama is not reachable (no local Ollama on the droplet) — host.docker.internal
+#     still resolves but will just fail fast; the routing layer handles that.
+
+services:
+  sml-gateway:
+    env_file: !override
+      - .env.production
+    environment:
+      DATABASE_URL: postgres://sml:sml@postgres:5432/smlgateway
+      REDIS_URL: redis://redis:6379
+      NEXTAUTH_URL: https://smlgateway.smlsoftdemo.com
+      AUTH_TRUST_HOST: "true"
+    restart: unless-stopped
+
+  caddy:
+    ports: !override
+      - "8335:80"
+    volumes: !override
+      - ./caddy-prod.Caddyfile:/etc/caddy/Caddyfile:ro
+    restart: unless-stopped
+
+  postgres:
+    ports: !reset []
+    restart: unless-stopped
+
+  redis:
+    ports: !reset []
+    restart: unless-stopped

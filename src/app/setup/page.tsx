@@ -17,7 +17,22 @@ interface ProviderStatus {
   modelCount: number;
   availableCount: number;
   status: "active" | "no_key" | "no_models" | "error" | "disabled";
+  notes?: string;
+  modelsUrl?: string;
+  authScheme?: string;
+  homepageOk?: boolean | null;
+  homepageStatusCode?: number | null;
+  modelsOk?: boolean | null;
+  modelsStatusCode?: number | null;
+  verifyNotes?: string;
+  lastVerifiedAt?: string | null;
+  publicModelsCount?: number | null;
 }
+
+// Provider "ของไทย" = notes / label / name มีคำว่า "thai" (case-insensitive)
+// ทำใน UI layer เท่านั้น — ไม่มีผลกับ routing decision (ตามกติกา no-hardcode)
+const isThaiProvider = (s: ProviderStatus) =>
+  /thai/i.test(s.notes ?? "") || /thai/i.test(s.label) || /thai/i.test(s.provider);
 
 const PROVIDER_ICONS: Record<string, string> = {
   openrouter: "🌐", kilo: "⚡", google: "🔍",
@@ -39,11 +54,11 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(true);
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
-  const [saveResult, setSaveResult] = useState<Record<string, "ok" | "error">>({});
+  const [saveResult, setSaveResult] = useState<Record<string, "ok" | "error" | undefined>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [testResult, setTestResult] = useState<Record<string, { ok?: boolean; models?: number; error?: string } | undefined>>({});
   const [scanning, setScanning] = useState(false);
-  const [filter, setFilter] = useState<"all" | "active" | "no_key" | "free">("all");
+  const [filter, setFilter] = useState<"all" | "active" | "no_key" | "free" | "thai" | "broken">("all");
 
   const fetchStatuses = useCallback(() => {
     fetch("/api/providers")
@@ -55,31 +70,36 @@ export default function SetupPage() {
 
   useEffect(() => {
     fetchStatuses();
+    // Auto-refresh every 30s so verify results show up without manual action
+    const id = setInterval(fetchStatuses, 30_000);
+    return () => clearInterval(id);
   }, [fetchStatuses]);
 
-  const handleTestKey = async (provider: string) => {
+  // Test → if valid, auto-save. One click does both.
+  const handleTestAndSave = async (provider: string) => {
     const apiKey = keyInputs[provider]?.trim();
     if (!apiKey) return;
     setTesting((p) => ({ ...p, [provider]: true }));
     setTestResult((p) => ({ ...p, [provider]: undefined }));
+    setSaveResult((p) => ({ ...p, [provider]: undefined }));
+    let testData: { ok?: boolean; models?: number; error?: string } | undefined;
     try {
       const res = await fetch("/api/setup/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider, apiKey }),
       });
-      const data = await res.json();
-      setTestResult((p) => ({ ...p, [provider]: data }));
+      testData = await res.json();
+      setTestResult((p) => ({ ...p, [provider]: testData }));
     } catch {
       setTestResult((p) => ({ ...p, [provider]: { ok: false, error: "Network error" } }));
     } finally {
       setTesting((p) => ({ ...p, [provider]: false }));
     }
-  };
 
-  const handleSaveKey = async (provider: string) => {
-    const apiKey = keyInputs[provider]?.trim();
-    if (!apiKey) return;
+    if (!testData || testData.ok !== true) return;
+
+    // Test passed → save immediately
     setSaving((p) => ({ ...p, [provider]: true }));
     try {
       const res = await fetch("/api/setup", {
@@ -90,7 +110,6 @@ export default function SetupPage() {
       if (res.ok) {
         setSaveResult((p) => ({ ...p, [provider]: "ok" }));
         setKeyInputs((p) => ({ ...p, [provider]: "" }));
-        setTestResult((p) => ({ ...p, [provider]: undefined }));
         fetchStatuses();
       } else {
         setSaveResult((p) => ({ ...p, [provider]: "error" }));
@@ -148,12 +167,16 @@ export default function SetupPage() {
   const activeCount = statuses.filter((s) => s.status === "active").length;
   const noKeyCount = statuses.filter((s) => s.status === "no_key").length;
   const freeCount = statuses.filter((s) => s.freeTier).length;
+  const thaiCount = statuses.filter(isThaiProvider).length;
+  const brokenCount = statuses.filter((s) => s.homepageOk === false || s.modelsOk === false).length;
   const canScan = statuses.some((s) => s.hasKey);
 
   const filtered = statuses.filter((s) => {
     if (filter === "active") return s.status === "active";
     if (filter === "no_key") return s.status === "no_key";
     if (filter === "free") return s.freeTier;
+    if (filter === "thai") return isThaiProvider(s);
+    if (filter === "broken") return s.homepageOk === false || s.modelsOk === false;
     return true;
   });
 
@@ -229,6 +252,8 @@ export default function SetupPage() {
             { id: "active",  label: `✓ ใช้ได้ (${activeCount})` },
             { id: "no_key",  label: `🔑 ยังไม่มีรหัส (${noKeyCount})` },
             { id: "free",    label: `🆓 ฟรี (${freeCount})` },
+            { id: "thai",    label: `🇹🇭 ของไทย (${thaiCount})` },
+            { id: "broken",  label: `⚠️ ลิงก์เสีย (${brokenCount})` },
           ] as const).map((f) => (
             <button
               key={f.id}
@@ -259,7 +284,6 @@ export default function SetupPage() {
               const isSaving = saving[st.provider] ?? false;
               const isTesting = testing[st.provider] ?? false;
               const testRes = testResult[st.provider];
-              const testPassed = testRes?.ok === true;
               const result = saveResult[st.provider];
 
               let statusBadge: { text: string; cls: string };
@@ -273,11 +297,19 @@ export default function SetupPage() {
                 case "error":
                   statusBadge = { text: `${st.modelCount} model ใช้ไม่ได้`, cls: "bg-red-500/20 text-red-300 border-red-500/30" };
                   break;
-                case "no_models":
-                  statusBadge = { text: "มีรหัสแล้ว — รอค้นหา", cls: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30" };
+                case "no_models": {
+                  const pub = st.publicModelsCount;
+                  statusBadge = pub && pub > 0
+                    ? { text: `มีรหัสแล้ว — รอสแกน (${pub} model)`, cls: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30" }
+                    : { text: "มีรหัสแล้ว — รอค้นหา", cls: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30" };
                   break;
-                default:
-                  statusBadge = { text: "ยังไม่มีรหัส", cls: "bg-amber-500/20 text-amber-300 border-amber-500/30" };
+                }
+                default: { // no_key
+                  const pub = st.publicModelsCount;
+                  statusBadge = pub && pub > 0
+                    ? { text: `ยังไม่มีรหัส — ${pub} model พร้อมสแกน`, cls: "bg-amber-500/20 text-amber-300 border-amber-500/30" }
+                    : { text: "ยังไม่มีรหัส", cls: "bg-amber-500/20 text-amber-300 border-amber-500/30" };
+                }
               }
 
               return (
@@ -300,6 +332,16 @@ export default function SetupPage() {
                         <span className="font-bold text-white">{st.label}</span>
                         {st.freeTier && <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/20">🆓 ฟรี</span>}
                         <span className={`text-[10px] px-2 py-0.5 rounded-full border ${statusBadge.cls}`}>{statusBadge.text}</span>
+                        {st.homepageOk === false && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/25" title={`homepage HTTP ${st.homepageStatusCode ?? "?"} — ${st.verifyNotes ?? ""}`}>
+                            ⚠️ ลิงก์สมัครเสีย
+                          </span>
+                        )}
+                        {st.modelsOk === false && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/25" title={`models HTTP ${st.modelsStatusCode ?? "?"} — ${st.verifyNotes ?? ""}`}>
+                            ⚠️ endpoint เสีย
+                          </span>
+                        )}
                         {result === "ok" && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 animate-pulse">บันทึกแล้ว!</span>
                         )}
@@ -307,6 +349,17 @@ export default function SetupPage() {
                       <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-500 font-mono truncate">
                         {st.envVar || st.provider}
                       </div>
+                      {st.lastVerifiedAt && (
+                        <div className="text-[10px] text-gray-600 mt-0.5" title={st.verifyNotes}>
+                          ตรวจล่าสุด: {new Date(st.lastVerifiedAt).toLocaleString("th-TH", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}
+                          {st.homepageOk !== null && st.homepageOk !== undefined && (
+                            <span className="ml-1">— หน้าเว็บ {st.homepageOk ? "✓" : `✗ (${st.homepageStatusCode ?? "?"})`}</span>
+                          )}
+                          {st.modelsOk !== null && st.modelsOk !== undefined && (
+                            <span className="ml-1">/ models {st.modelsOk ? "✓" : `✗ (${st.modelsStatusCode ?? "?"})`}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex flex-col items-end gap-1.5 shrink-0">
                       <button
@@ -346,23 +399,16 @@ export default function SetupPage() {
                             setKeyInputs((p) => ({ ...p, [st.provider]: e.target.value }));
                             setTestResult((p) => ({ ...p, [st.provider]: undefined }));
                           }}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleTestKey(st.provider); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleTestAndSave(st.provider); }}
                           className="flex-1 min-w-0 text-xs font-mono bg-gray-900/80 border border-white/10 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
                         />
                         <button
-                          onClick={() => handleTestKey(st.provider)}
-                          disabled={isTesting || !(keyInputs[st.provider]?.trim())}
-                          className="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          onClick={() => handleTestAndSave(st.provider)}
+                          disabled={isTesting || isSaving || !(keyInputs[st.provider]?.trim())}
+                          title="ทดสอบรหัส ถ้าใช้ได้จะบันทึกให้อัตโนมัติ"
+                          className="px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                         >
-                          {isTesting ? "..." : "ทดสอบ"}
-                        </button>
-                        <button
-                          onClick={() => handleSaveKey(st.provider)}
-                          disabled={isSaving || !testPassed}
-                          title={!testPassed ? "ทดสอบให้ผ่านก่อนถึงจะบันทึกได้" : "บันทึกรหัส"}
-                          className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                        >
-                          {isSaving ? "..." : "บันทึก"}
+                          {isTesting ? "กำลังทดสอบ…" : isSaving ? "กำลังบันทึก…" : "ทดสอบ + บันทึก"}
                         </button>
                         {st.hasDbKey && (
                           <button
@@ -377,14 +423,24 @@ export default function SetupPage() {
                           </button>
                         )}
                       </div>
-                      {testRes?.ok === true && (
-                        <div className="text-[11px] text-emerald-300 flex items-center gap-1.5">
-                          ✓ ทดสอบผ่าน — เจอ {testRes.models ?? 0} model
+                      {testRes?.ok === true && result === "ok" && (
+                        <div className="text-[11px] text-emerald-300 flex items-center gap-1.5 font-semibold">
+                          ✅ ทดสอบผ่าน ({testRes.models ?? 0} model) — บันทึกสำเร็จ
+                        </div>
+                      )}
+                      {testRes?.ok === true && result !== "ok" && isSaving && (
+                        <div className="text-[11px] text-cyan-300 flex items-center gap-1.5">
+                          ✓ ทดสอบผ่าน ({testRes.models ?? 0} model) — กำลังบันทึก…
                         </div>
                       )}
                       {testRes?.ok === false && (
                         <div className="text-[11px] text-red-300 flex items-center gap-1.5" title={testRes.error}>
-                          ✗ ใช้ไม่ได้: {testRes.error?.slice(0, 80) ?? "ไม่ทราบสาเหตุ"}
+                          ✗ ทดสอบไม่ผ่าน: {testRes.error?.slice(0, 80) ?? "ไม่ทราบสาเหตุ"}
+                        </div>
+                      )}
+                      {result === "error" && (
+                        <div className="text-[11px] text-red-300 flex items-center gap-1.5">
+                          ✗ บันทึกไม่สำเร็จ — ลองใหม่
                         </div>
                       )}
                     </div>

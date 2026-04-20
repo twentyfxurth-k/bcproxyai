@@ -1,49 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSqlClient } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
 
-const PROVIDER_MODELS: Record<string, { url: string; auth: "bearer" | "query-key" | "none" }> = {
-  openrouter: { url: "https://openrouter.ai/api/v1/models", auth: "bearer" },
-  kilo: { url: "https://api.kilo.ai/api/gateway/models", auth: "bearer" },
-  google: { url: "https://generativelanguage.googleapis.com/v1beta/models", auth: "query-key" },
-  groq: { url: "https://api.groq.com/openai/v1/models", auth: "bearer" },
-  cerebras: { url: "https://api.cerebras.ai/v1/models", auth: "bearer" },
-  sambanova: { url: "https://api.sambanova.ai/v1/models", auth: "bearer" },
-  mistral: { url: "https://api.mistral.ai/v1/models", auth: "bearer" },
-  ollama: { url: `${process.env.OLLAMA_BASE_URL || "http://localhost:11434"}/v1/models`, auth: "none" },
-  github: { url: "https://models.github.ai/inference/models", auth: "bearer" },
-  fireworks: { url: "https://api.fireworks.ai/inference/v1/models", auth: "bearer" },
-  cohere: { url: "https://api.cohere.com/v2/models", auth: "bearer" },
-  cloudflare: { url: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID || "unknown"}/ai/models/search?task=Text+Generation`, auth: "bearer" },
-  huggingface: { url: "https://huggingface.co/api/models?pipeline_tag=text-generation&sort=trending&limit=5", auth: "bearer" },
-  nvidia: { url: "https://integrate.api.nvidia.com/v1/models", auth: "bearer" },
-  chutes: { url: "https://llm.chutes.ai/v1/models", auth: "bearer" },
-  llm7: { url: "https://api.llm7.io/v1/models", auth: "bearer" },
-  scaleway: { url: "https://api.scaleway.ai/v1/models", auth: "bearer" },
-  pollinations: { url: "https://text.pollinations.ai/models", auth: "none" },
-  ollamacloud: { url: "https://ollama.com/v1/models", auth: "bearer" },
-  siliconflow: { url: "https://api.siliconflow.cn/v1/models", auth: "bearer" },
-  glhf: { url: "https://glhf.chat/api/openai/v1/models", auth: "bearer" },
-  together: { url: "https://api.together.xyz/v1/models", auth: "bearer" },
-  hyperbolic: { url: "https://api.hyperbolic.xyz/v1/models", auth: "bearer" },
-  zai: { url: "https://api.z.ai/api/paas/v4/chat/completions", auth: "bearer" },
-  dashscope: { url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models", auth: "bearer" },
-  reka: { url: "https://api.reka.ai/v1/models", auth: "bearer" },
-};
+// Source of truth: provider_catalog.models_url + .auth_scheme (+ .auth_header_name)
+// No hardcoded table here — adding a provider = INSERT into DB, not editing this file.
+interface CatalogRow {
+  name: string;
+  models_url: string | null;
+  auth_scheme: string | null;
+  auth_header_name: string | null;
+}
 
 export async function POST(req: NextRequest) {
   const { provider, apiKey } = await req.json();
-
-  const config = PROVIDER_MODELS[provider];
-  if (!config) {
-    return NextResponse.json({ ok: false, error: "Unknown provider" }, { status: 400 });
+  if (!provider || typeof provider !== "string") {
+    return NextResponse.json({ ok: false, error: "Missing provider" }, { status: 400 });
   }
 
-  let url = config.url;
-  if (config.auth === "query-key") url += `?key=${apiKey}`;
+  const sql = getSqlClient();
+  const rows = await sql<CatalogRow[]>`
+    SELECT name, models_url, auth_scheme, auth_header_name
+    FROM provider_catalog
+    WHERE name = ${provider}
+    LIMIT 1
+  `;
+  if (rows.length === 0) {
+    return NextResponse.json({ ok: false, error: `Provider not in catalog: ${provider}` }, { status: 404 });
+  }
+  const cfg = rows[0];
 
-  const headers: Record<string, string> = {};
-  if (config.auth === "bearer") headers["Authorization"] = `Bearer ${apiKey}`;
+  // Cloudflare needs account id baked into URL — allow a runtime template
+  let url = cfg.models_url ?? "";
+  if (!url && provider === "cloudflare") {
+    const acct = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
+    if (!acct) return NextResponse.json({ ok: false, error: "CLOUDFLARE_ACCOUNT_ID not set" });
+    url = `https://api.cloudflare.com/client/v4/accounts/${acct}/ai/models/search?task=Text+Generation`;
+  }
+  if (!url) {
+    return NextResponse.json({
+      ok: false,
+      error: "No models_url configured for this provider — run verify worker or set it in provider_catalog.",
+    });
+  }
+
+  const scheme = (cfg.auth_scheme ?? "bearer") as "bearer" | "query-key" | "none" | "apikey-header";
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (scheme === "bearer") headers["Authorization"] = `Bearer ${apiKey}`;
+  else if (scheme === "apikey-header") headers[cfg.auth_header_name ?? "apikey"] = apiKey;
+  else if (scheme === "query-key") {
+    const sep = url.includes("?") ? "&" : "?";
+    url = `${url}${sep}key=${encodeURIComponent(apiKey)}`;
+  }
+  // scheme === "none" → no auth added
 
   try {
     const res = await fetch(url, {
@@ -59,9 +68,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
     const models =
-      json.data?.length ?? json.models?.length ?? json.result?.length ?? 0;
+      (Array.isArray(json.data) ? json.data.length : 0) ||
+      (Array.isArray(json.models) ? json.models.length : 0) ||
+      (Array.isArray(json.result) ? json.result.length : 0) ||
+      (Array.isArray(json) ? json.length : 0);
 
     return NextResponse.json({ ok: true, models });
   } catch (err) {

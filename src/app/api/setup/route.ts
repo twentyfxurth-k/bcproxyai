@@ -6,12 +6,19 @@ import { runWorkerCycle } from "@/lib/worker";
 
 export const dynamic = "force-dynamic";
 
-const VALID_PROVIDERS = new Set([
-  "openrouter", "kilo", "google", "groq", "cerebras", "sambanova",
-  "mistral", "ollama", "github", "fireworks", "cohere", "cloudflare", "huggingface", "nvidia",
-  "chutes", "llm7", "scaleway", "pollinations", "ollamacloud", "siliconflow", "glhf",
-  "together", "hyperbolic", "zai", "dashscope", "reka",
-]);
+// Validity is derived from provider_catalog (no hardcoded allowlist).
+async function isValidProvider(provider: string): Promise<boolean> {
+  if (!provider || typeof provider !== "string") return false;
+  try {
+    const sql = getSqlClient();
+    const rows = await sql<{ count: string }[]>`
+      SELECT COUNT(*) AS count FROM provider_catalog WHERE name = ${provider}
+    `;
+    return Number(rows[0]?.count ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
 
 export async function GET() {
   try {
@@ -39,8 +46,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { provider, apiKey, enabled } = body as { provider: string; apiKey?: string; enabled?: boolean };
 
-    if (!provider || !VALID_PROVIDERS.has(provider)) {
-      return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
+    if (!(await isValidProvider(provider))) {
+      return NextResponse.json({ error: `Unknown provider: ${provider}` }, { status: 400 });
     }
 
     // Toggle เปิด/ปิด provider (ไม่ต้องส่ง apiKey)

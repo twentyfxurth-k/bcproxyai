@@ -102,19 +102,158 @@ export async function getBestModelsForCategory(promptCategory: string): Promise<
 export async function getBestModelsByBenchmarkCategory(category: string): Promise<string[]> {
   try {
     const sql = getSqlClient();
+    // Windowed AVG: only look at the 20 most recent evaluations per model so
+    // a burst of post-gen Thai penalties can demote the model within a few
+    // requests, instead of being drowned by historical high scores.
     const rows = await sql<{ model_id: string }[]>`
-      SELECT model_id, AVG(score) as avg_score, COUNT(*) as q_count
-      FROM benchmark_results
-      WHERE category = ${category}
+      SELECT model_id, AVG(score) AS avg_score, COUNT(*) AS q_count
+      FROM (
+        SELECT model_id, score,
+          ROW_NUMBER() OVER (PARTITION BY model_id ORDER BY tested_at DESC) AS rn
+        FROM benchmark_results
+        WHERE category = ${category}
+      ) t
+      WHERE rn <= 20
       GROUP BY model_id
       HAVING COUNT(*) >= 1 AND AVG(score) >= 5
-      ORDER BY avg_score DESC
+      ORDER BY AVG(score) DESC, COUNT(*) DESC
       LIMIT 20
     `;
     return rows.map(r => r.model_id);
   } catch {
     return [];
   }
+}
+
+/**
+ * Post-generation Thai quality check.
+ *
+ * Scoring:
+ *   - User prompt must contain ≥ 3 Thai codepoints (otherwise the category
+ *     classifier was wrong and we shouldn't judge).
+ *   - Adaptive reply threshold: short prompts like "พิมพ์คำว่า สวัสดี"
+ *     deserve short replies, so we require min(10, max(3, userThai/2)) Thai
+ *     codepoints back rather than a fixed 10.
+ *   - `?` ratio > 0.25 always fails (mojibake from bad UTF-8 handling).
+ *   - Very short replies (< 6 total chars) are skipped — nothing to judge.
+ *
+ * Persistence:
+ *   - benchmark_results is a VIEW over exam_attempts + exam_answers, so we
+ *     cannot INSERT into it directly. We create an exam_attempts row
+ *     (attempt_number=99 = auto-penalty marker, exam_level=null) plus one
+ *     exam_answers row with question_id prefixed "thai-autopenalty-" so the
+ *     retention sweep can identify and prune them.
+ *   - 60-second per-model dedup prevents a flood of identical penalties from
+ *     one bad model's burst.
+ *   - Retention sweep runs lazily (1% sample per call) to delete rows > 7d.
+ */
+const THAI_FAIL_FIXED_MIN_CHARS = 10;
+const THAI_FAIL_QMARK_RATIO = 0.25;
+const THAI_FAIL_MIN_REPLY_LEN = 6;
+const DEDUP_WINDOW_MS = 60_000;
+const PENALTY_RETENTION_DAYS = 7;
+
+const lastPenaltyAt = new Map<string, number>();
+
+function adaptiveReplyMinChars(userThai: number): number {
+  return Math.min(THAI_FAIL_FIXED_MIN_CHARS, Math.max(3, Math.floor(userThai / 2)));
+}
+
+async function cleanupOldPenalties(): Promise<void> {
+  if (Math.random() > 0.01) return; // 1% sample — cheap amortised cleanup
+  try {
+    const sql = getSqlClient();
+    await sql`
+      DELETE FROM exam_answers
+      WHERE question_id LIKE 'thai-autopenalty-%'
+        AND id IN (
+          SELECT ea.id FROM exam_answers ea
+          JOIN exam_attempts a ON a.id = ea.attempt_id
+          WHERE a.started_at < now() - (${PENALTY_RETENTION_DAYS}::int || ' days')::interval
+        )
+    `;
+    await sql`
+      DELETE FROM exam_attempts
+      WHERE attempt_number = 99
+        AND started_at < now() - (${PENALTY_RETENTION_DAYS}::int || ' days')::interval
+    `;
+  } catch { /* non-critical */ }
+}
+
+export async function recordThaiQualityPenalty(
+  modelId: string,
+  provider: string,
+  userContent: string,
+  responseContent: string,
+): Promise<boolean> {
+  if (!responseContent || responseContent.length < THAI_FAIL_MIN_REPLY_LEN) return false;
+
+  let userThai = 0;
+  for (const c of userContent) {
+    const cp = c.codePointAt(0)!;
+    if (cp >= 0x0e00 && cp <= 0x0e7f) userThai++;
+  }
+  if (userThai < 3) return false;
+
+  let replyThai = 0;
+  let qMarks = 0;
+  for (const c of responseContent) {
+    const cp = c.codePointAt(0)!;
+    if (cp >= 0x0e00 && cp <= 0x0e7f) replyThai++;
+    if (c === '?') qMarks++;
+  }
+  const qRatio = qMarks / responseContent.length;
+  const minReplyThai = adaptiveReplyMinChars(userThai);
+  const failed = replyThai < minReplyThai || qRatio > THAI_FAIL_QMARK_RATIO;
+  if (!failed) return false;
+
+  const now = Date.now();
+  const last = lastPenaltyAt.get(modelId) ?? 0;
+  if (now - last < DEDUP_WINDOW_MS) return false;
+  lastPenaltyAt.set(modelId, now);
+
+  try {
+    const sql = getSqlClient();
+    // The view benchmark_results is derived from exam_attempts ⨝ exam_answers,
+    // so we insert one attempt + one answer per penalty event. The row shows
+    // up as score=0 (view maps passed=false → score 0) under category='thai'.
+    const qid = `thai-autopenalty-${now}`;
+    await sql`
+      WITH a AS (
+        INSERT INTO exam_attempts (
+          model_id, attempt_number, started_at, finished_at,
+          total_questions, passed_questions, score_pct, passed,
+          total_latency_ms
+        )
+        VALUES (
+          ${modelId}, 99, now(), now(),
+          1, 0, 0, false,
+          0
+        )
+        RETURNING id
+      )
+      INSERT INTO exam_answers (
+        attempt_id, question_id, category, question, answer,
+        passed, check_method, fail_reason
+      )
+      SELECT a.id, ${qid}, 'thai', 'auto-penalty', ${responseContent.slice(0, 200)},
+        false, 'post-gen-thai-check',
+        ${`replyThai=${replyThai} minRequired=${minReplyThai} qRatio=${qRatio.toFixed(2)}`}
+      FROM a
+    `;
+    await emitEvent(
+      'thai_quality_fail',
+      `Auto-demoted ${modelId} for Thai routing`,
+      `replyThai=${replyThai}/${minReplyThai}, qRatio=${qRatio.toFixed(2)}, userThai=${userThai}`,
+      provider,
+      modelId,
+      'warn',
+    );
+    void cleanupOldPenalties();
+  } catch {
+    /* non-critical */
+  }
+  return true;
 }
 
 /**

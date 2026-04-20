@@ -166,6 +166,42 @@ export async function runMigrations(): Promise<void> {
       )
     `;
     await sql`CREATE INDEX IF NOT EXISTS idx_provider_catalog_status ON provider_catalog(status, source)`;
+
+    // Verify columns — so /api/setup/test can read from DB instead of hardcoding
+    // and a worker can probe homepage + models URL on a schedule
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS models_url TEXT`;
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS auth_scheme TEXT DEFAULT 'bearer'`;
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS auth_header_name TEXT`;
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS last_verified_at TIMESTAMPTZ`;
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS homepage_status_code INT`;
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS homepage_ok BOOLEAN`;
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS models_status_code INT`;
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS models_ok BOOLEAN`;
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS verify_notes TEXT`;
+    // Count of models the provider advertises in /v1/models (public list).
+    // Populated by the verify worker from the probe response — useful to show
+    // "N model พร้อมใช้" before the user has set up an API key.
+    await sql`ALTER TABLE provider_catalog ADD COLUMN IF NOT EXISTS public_models_count INT`;
+
+    // Gateway API keys — admin-issued Bearer tokens for clients of SMLGateway.
+    // We store only the SHA-256 hash; the plaintext is shown to the admin once
+    // on creation. `key_prefix` is the first 12 chars kept in cleartext so the
+    // admin can identify a key in the list view.
+    await sql`
+      CREATE TABLE IF NOT EXISTS gateway_api_keys (
+        id BIGSERIAL PRIMARY KEY,
+        key_hash TEXT UNIQUE NOT NULL,
+        key_prefix TEXT NOT NULL,
+        label TEXT NOT NULL,
+        created_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT now(),
+        last_used_at TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ,
+        enabled BOOLEAN DEFAULT true,
+        notes TEXT
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_gateway_keys_hash ON gateway_api_keys(key_hash) WHERE enabled = true`;
     await sql`
       CREATE TABLE IF NOT EXISTS discovered_questions (
         id BIGSERIAL PRIMARY KEY,

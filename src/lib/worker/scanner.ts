@@ -834,6 +834,15 @@ async function fetchRekaModels(): Promise<ModelRow[]> {
   });
 }
 
+async function fetchTyphoonModels(): Promise<ModelRow[]> {
+  return fetchGenericOpenAI({
+    provider: "typhoon",
+    envKeyName: "TYPHOON_API_KEY",
+    modelsUrl: "https://api.opentyphoon.ai/v1/models",
+    defaultContext: 32_768,
+  });
+}
+
 async function fetchHuggingFaceModels(): Promise<ModelRow[]> {
   const token = getNextApiKey("huggingface");
   if (!token) return [];
@@ -910,7 +919,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     cloudflareModels, hfModels, nvidiaModels,
     chutesModels, llm7Models, scalewayModels, pollinationsModels, ollamaCloudModels,
     siliconflowModels, glhfModels, togetherModels, hyperbolicModels,
-    zaiModels, dashscopeModels, rekaModels,
+    zaiModels, dashscopeModels, rekaModels, typhoonModels,
   ] = await Promise.all([
     guard("openrouter", fetchOpenRouterModels),
     guard("kilo", fetchKiloModels),
@@ -938,6 +947,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     guard("zai", fetchZaiModels),
     guard("dashscope", fetchDashScopeModels),
     guard("reka", fetchRekaModels),
+    guard("typhoon", fetchTyphoonModels),
   ]);
 
   const allModels = [
@@ -946,7 +956,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     ...cloudflareModels, ...hfModels, ...nvidiaModels,
     ...chutesModels, ...llm7Models, ...scalewayModels, ...pollinationsModels, ...ollamaCloudModels,
     ...siliconflowModels, ...glhfModels, ...togetherModels, ...hyperbolicModels,
-    ...zaiModels, ...dashscopeModels, ...rekaModels,
+    ...zaiModels, ...dashscopeModels, ...rekaModels, ...typhoonModels,
   ];
   const foundIds = new Set(allModels.map(m => m.id));
   let newCount = 0;

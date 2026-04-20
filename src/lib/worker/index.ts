@@ -3,6 +3,8 @@ import { scanModels } from "./scanner";
 import { checkHealth } from "./health";
 import { runExams } from "./exam";
 import { discoverProviders } from "./provider-discovery";
+import { verifyAllProviders } from "./provider-verify";
+import { syncProviderRegistry } from "./provider-registry-sync";
 import { appointTeachers } from "@/lib/teacher";
 import { acquireLeader, renewLeader, releaseLeader } from "./leader";
 import { startWarmup } from "./warmup";
@@ -24,7 +26,13 @@ export interface WorkerStatus {
 }
 
 let workerTimer: ReturnType<typeof setInterval> | null = null;
+let verifyTimer: ReturnType<typeof setInterval> | null = null;
+let registryTimer: ReturnType<typeof setInterval> | null = null;
+let examTimer: ReturnType<typeof setInterval> | null = null;
 let isRunning = false;
+let verifyRunning = false;
+let registryRunning = false;
+let examRunning = false;
 
 async function getState(key: string): Promise<string | null> {
   try {
@@ -119,6 +127,16 @@ export async function runWorkerCycle(): Promise<void> {
 
   await renewLeader();
 
+  // Step 0.5: Verify — ตรวจ homepage + models URL ของทุก provider (no hardcode — อ่านจาก DB)
+  try {
+    await logWorker("worker", "Step 0.5: Verifying provider homepages + models URLs");
+    await verifyAllProviders();
+  } catch (err) {
+    await logWorker("worker", `Step 0.5 (verify) failed: ${err}`, "error");
+  }
+
+  await renewLeader();
+
   try {
     // Step 1: Scan
     await logWorker("worker", "Step 1: Scanning models");
@@ -185,7 +203,7 @@ export async function runWorkerCycle(): Promise<void> {
 export function startWorker(): void {
   if (workerTimer) return; // already started
 
-  logWorker("worker", "Worker starting — running immediately then every 15 min");
+  logWorker("worker", "Worker starting — cycle 15min, verify 3min");
 
   // Run once immediately (async, don't block)
   runWorkerCycle().catch((err) => {
@@ -194,7 +212,7 @@ export function startWorker(): void {
     setState("status", "error");
   });
 
-  // Then every 15 minutes
+  // Main cycle every 15 minutes (discover + verify + scan + health + exam)
   workerTimer = setInterval(() => {
     runWorkerCycle().catch((err) => {
       logWorker("worker", `Scheduled cycle error: ${err}`, "error");
@@ -203,8 +221,76 @@ export function startWorker(): void {
     });
   }, 15 * 60 * 1000);
 
+  // Dedicated verify loop every 3 minutes — lightweight probe so the dashboard
+  // always shows fresh homepage / endpoint reachability without waiting for the
+  // full 15-min cycle. Leader-locked so only one replica probes when scaled.
+  verifyTimer = setInterval(() => {
+    runStandaloneVerify().catch((err) => {
+      logWorker("verify", `Standalone verify error: ${err}`, "error");
+      verifyRunning = false;
+    });
+  }, 3 * 60 * 1000);
+
+  // Registry sync — pulls cheahjs/free-llm-api-resources + LiteLLM registry
+  // every 6 hours. Only patches rows where the probe marked the homepage dead,
+  // so working URLs are never overwritten.
+  runStandaloneRegistrySync().catch(() => {}); // initial sync
+  registryTimer = setInterval(() => {
+    runStandaloneRegistrySync().catch((err) => {
+      logWorker("registry-sync", `Sync error: ${err}`, "error");
+      registryRunning = false;
+    });
+  }, 6 * 60 * 60 * 1000);
+
+  // Exam loop every 5 minutes — clears the exam backlog faster than the main
+  // 15-minute cycle alone. Leader-locked + skipped if main cycle running.
+  examTimer = setInterval(() => {
+    runStandaloneExam().catch((err) => {
+      logWorker("exam", `Standalone exam error: ${err}`, "error");
+      examRunning = false;
+    });
+  }, 5 * 60 * 1000);
+
   // Warmup pinger — keeps upstream sockets hot between cycles
   startWarmup();
+}
+
+async function runStandaloneRegistrySync(): Promise<void> {
+  if (registryRunning) return;
+  registryRunning = true;
+  try {
+    const isLeader = await acquireLeader();
+    if (!isLeader) return;
+    await syncProviderRegistry();
+  } finally {
+    registryRunning = false;
+  }
+}
+
+async function runStandaloneExam(): Promise<void> {
+  if (examRunning || isRunning) return;
+  examRunning = true;
+  try {
+    const isLeader = await acquireLeader();
+    if (!isLeader) return;
+    await runExams();
+  } finally {
+    examRunning = false;
+  }
+}
+
+async function runStandaloneVerify(): Promise<void> {
+  if (verifyRunning) return;
+  // Don't overlap with main cycle's verify step
+  if (isRunning) return;
+  verifyRunning = true;
+  try {
+    const isLeader = await acquireLeader();
+    if (!isLeader) return;
+    await verifyAllProviders();
+  } finally {
+    verifyRunning = false;
+  }
 }
 
 export async function getWorkerStatus(): Promise<WorkerStatus> {

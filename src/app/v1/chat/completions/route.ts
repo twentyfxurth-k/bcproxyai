@@ -7,7 +7,7 @@ import { compressMessages } from "@/lib/prompt-compress";
 import { openAIError, ensureChatCompletionFields } from "@/lib/openai-compat";
 import { autoDetectComplaint } from "@/lib/auto-complaint";
 import { getReputationScore } from "@/lib/worker/complaint";
-import { detectPromptCategory, recordRoutingResult, getBestModelsForCategory, getBestModelsByBenchmarkCategory, emitEvent, getRealAvgLatency } from "@/lib/routing-learn";
+import { detectPromptCategory, recordRoutingResult, getBestModelsForCategory, getBestModelsByBenchmarkCategory, emitEvent, getRealAvgLatency, recordThaiQualityPenalty } from "@/lib/routing-learn";
 import { getRedis } from "@/lib/redis";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { getCachedResponse, setCachedResponse } from "@/lib/response-cache";
@@ -32,6 +32,16 @@ const ROUTING_TO_EXAM_CAT: Record<string, string> = {
   "knowledge": "reasoning",
   "general": "general",  // will use overall score
 };
+
+// Prompt/response content logging — default OFF in prod to avoid PII leakage
+// into docker logs / journalctl. Opt-in with GATEWAY_LOG_PROMPTS=1 when
+// debugging locally.
+const LOG_PROMPTS = process.env.GATEWAY_LOG_PROMPTS === "1";
+function redactForLog(s: string | null | undefined): string {
+  if (!s) return "-";
+  if (LOG_PROMPTS) return s.slice(0, 80);
+  return `<${s.length}ch>`;
+}
 
 // Slow threshold แปรผันตาม context size — request ใหญ่ช้ากว่าปกติ
 function slowThresholdMs(estInputTokens: number): number {
@@ -473,7 +483,7 @@ function parseModelField(model: string): {
   if (model === "sml/thai") return { mode: "thai" };
   if (model === "sml/consensus") return { mode: "consensus" };
 
-  const providerMatch = model.match(/^(openrouter|kilo|google|groq|cerebras|sambanova|mistral|ollama|github|fireworks|cohere|cloudflare|huggingface|nvidia|chutes|llm7|scaleway|pollinations|ollamacloud|siliconflow|glhf|together|hyperbolic|zai|dashscope|reka)\/(.+)$/);
+  const providerMatch = model.match(/^(typhoon|openrouter|kilo|google|groq|cerebras|sambanova|mistral|ollama|github|fireworks|cohere|cloudflare|huggingface|nvidia|chutes|llm7|scaleway|pollinations|ollamacloud|siliconflow|glhf|together|hyperbolic|zai|dashscope|reka)\/(.+)$/);
   if (providerMatch) return { mode: "direct", provider: providerMatch[1], modelId: providerMatch[2] };
 
   return { mode: "match", modelId: model };
@@ -868,7 +878,7 @@ export async function POST(req: NextRequest) {
     const isStream = body.stream === true;
     const caps = detectRequestCapabilities(body);
     const _reqTime = Date.now();
-    const _reqMsg = extractUserMessage(body)?.slice(0, 80) ?? "-";
+    const _reqMsg = redactForLog(extractUserMessage(body));
     const _reqId = Math.random().toString(36).slice(2, 8); // short id สำหรับไล่ log
     const _msgCount = Array.isArray(body.messages) ? (body.messages as unknown[]).length : 0;
     const _estTokensInit = estimateTokens(body);
@@ -1083,7 +1093,14 @@ export async function POST(req: NextRequest) {
 
     let finalCandidates = candidates;
     if (finalCandidates.length === 0) {
-      finalCandidates = await selectModelsByMode(parsed.mode, caps, benchmarkCategory, estInputTokens);
+      // Fallback: the exam worker is running in parallel, and DISTINCT ON picks
+      // the latest attempt per model. A single bad worker round can flip all
+      // rows to score_pct=0 for a ~second, and we don't want real traffic to
+      // 503 through that window. Fall back to a permissive list (no exam
+      // filter) so the request still gets served; the per-request retry loop
+      // below will weed out actually-broken models.
+      console.log(`[FALLBACK:${_reqId}] selectModelsByMode returned 0 — using getAllModelsIncludingCooldown`);
+      finalCandidates = await getAllModelsIncludingCooldown(caps);
     }
     if (finalCandidates.length === 0) {
       const reason = "ไม่มี model ที่ผ่านสอบ — รอ worker exam cycle";
@@ -1434,6 +1451,13 @@ export async function POST(req: NextRequest) {
               hasTools: caps.hasTools, hasImages: caps.hasImages,
               userMessage: extractUserMessage(body) ?? "",
             }).catch(() => {});
+            if (promptCategory === "thai" && content) {
+              recordThaiQualityPenalty(winner.id, winner.provider, extractUserMessage(body) ?? "", content)
+                .then((demoted) => {
+                  if (demoted) console.log(`[THAI-DEMOTE] ${winner.provider}/${winner.model_id} failed post-gen Thai check`);
+                })
+                .catch(() => {});
+            }
             const slowThr = slowThresholdMs(estTokens);
             if (latency > slowThr) {
               await logCooldown(winner.id, `slow hedge winner: ${latency}ms > ${slowThr}ms threshold`, 0, 2);
@@ -1458,7 +1482,7 @@ export async function POST(req: NextRequest) {
             hedgeHeaders.set("Access-Control-Allow-Origin", "*");
             const _hpt = usage?.prompt_tokens ?? 0; const _hct = usage?.completion_tokens ?? 0;
             const _htc = Array.isArray(json.choices?.[0]?.message?.tool_calls) ? json.choices[0].message.tool_calls.length : 0;
-            const _hans = content?.slice(0, 80) ?? (_htc > 0 ? `[tool_call×${_htc}]` : "-");
+            const _hans = content ? redactForLog(content) : (_htc > 0 ? `[tool_call×${_htc}]` : "-");
             console.log(`[RES:${_reqId}] 200 | ${winner.provider}/${winner.model_id} | ${latency}ms | hedge | pt=${_hpt} ct=${_hct} tc=${_htc} | Q:"${_reqMsg}" A:"${_hans}"`);
             return new Response(JSON.stringify(json), { status: 200, headers: hedgeHeaders });
           }
@@ -1644,6 +1668,22 @@ export async function POST(req: NextRequest) {
                 hasTools: caps.hasTools, hasImages: caps.hasImages,
                 userMessage: extractUserMessage(body) ?? "",
               }).catch(() => {});
+              if (promptCategory === "thai" && content) {
+                recordThaiQualityPenalty(
+                  dbModelId,
+                  provider,
+                  extractUserMessage(body) ?? "",
+                  content,
+                )
+                  .then((demoted) => {
+                    if (demoted) {
+                      console.log(
+                        `[THAI-DEMOTE] ${provider}/${actualModelId} failed post-gen Thai check — benchmark score reset`,
+                      );
+                    }
+                  })
+                  .catch(() => {});
+              }
               // ช้าเกิน threshold → cooldown ถึงแม้จะตอบสำเร็จ (threshold แปรตาม context size)
               const slowThrNon = slowThresholdMs(estTokens);
               if (latency > slowThrNon) {
@@ -1680,7 +1720,7 @@ export async function POST(req: NextRequest) {
               recordBattleEvent(outcomeFromLatency(latency, true)).catch(() => { /* cosmetic */ });
               const _pt = usage?.prompt_tokens ?? 0; const _ct = usage?.completion_tokens ?? 0;
               const _tc = hasToolCalls ? (firstMsg!.tool_calls!.length) : 0;
-              const _ans = content?.slice(0, 80) ?? (hasToolCalls ? `[tool_call×${_tc}]` : "-");
+              const _ans = content ? redactForLog(content) : (hasToolCalls ? `[tool_call×${_tc}]` : "-");
               console.log(`[RES:${_reqId}] 200 | ${provider}/${actualModelId} | ${latency}ms | pt=${_pt} ct=${_ct} tc=${_tc} | Q:"${_reqMsg}" A:"${_ans}"`);
               return new Response(JSON.stringify(json), { status: 200, headers });
             } catch {

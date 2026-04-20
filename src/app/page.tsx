@@ -233,6 +233,14 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center gap-2">
               <a
+                href="/admin/keys"
+                className="px-3 py-1.5 rounded-lg text-amber-300 hover:text-amber-200 hover:bg-amber-500/10 border border-amber-500/30 transition-colors text-xs"
+                title="จัดการ API Key ของ gateway (owner only)"
+              >
+                <span className="mr-1">🔑</span>
+                API Keys
+              </a>
+              <a
                 href="/setup"
                 className="px-3 py-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors text-xs"
                 title="ตั้งค่า API Key"
@@ -256,7 +264,7 @@ export default function Dashboard() {
                 คู่มือ
               </a>
               <a
-                href="https://github.com/jaturapornchai/sml-gateway"
+                href="https://github.com/jaturapornchai/bcproxyai"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"

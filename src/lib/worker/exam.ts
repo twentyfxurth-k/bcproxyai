@@ -17,8 +17,8 @@ import { join } from "path";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const MAX_MODELS_PER_RUN = 25;
-const CONCURRENCY = 5;
+const MAX_MODELS_PER_RUN = 60;  // was 25 — clear backlog faster
+const CONCURRENCY = 8;           // was 5
 const RETEST_HOURS = 24;       // fail แล้วรอ 24h ค่อยสอบใหม่
 const REQUEST_TIMEOUT_MS = 20_000;
 
@@ -1076,7 +1076,13 @@ export async function runExams(): Promise<{ examined: number; passed: number; fa
       AND COALESCE(m.supports_audio_output, 0) != 1
       AND COALESCE(m.supports_image_gen, 0) != 1
       AND m.context_length >= 4000
-      AND (lh.cooldown_until IS NULL OR lh.cooldown_until < now())
+      -- Never-attempted models bypass health cooldown — otherwise a transient
+      -- 429 during the first health probe keeps them stuck forever.
+      AND (
+        la.finished_at IS NULL
+        OR lh.cooldown_until IS NULL
+        OR lh.cooldown_until < now()
+      )
       AND (
         la.finished_at IS NULL
         OR (la.next_exam_at IS NOT NULL AND la.next_exam_at <= now())

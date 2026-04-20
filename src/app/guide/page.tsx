@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 // ─── Shared style helpers ────────────────────────────────────────────────────
 
@@ -45,15 +45,6 @@ function Info({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Warn({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-start gap-2">
-      <span className="text-amber-400 text-lg shrink-0">&#9888;</span>
-      <div className="text-sm text-amber-200 leading-relaxed">{children}</div>
-    </div>
-  );
-}
-
 function Step({ num, title, children }: { num: number; title: string; children: React.ReactNode }) {
   return (
     <div className="flex gap-3">
@@ -70,16 +61,17 @@ function Step({ num, title, children }: { num: number; title: string; children: 
 
 // ─── Code snippets for Quick Connect ─────────────────────────────────────────
 
-type Lang = "nextjs" | "python" | "curl" | "langchain" | "openclaw" | "any";
+type Lang = "nextjs" | "python" | "curl" | "langchain" | "hermes" | "openclaw" | "any";
 
-const SNIPPETS: Record<Lang, { label: string; code: string; note?: string }> = {
+function buildSnippets(base: string, key: string): Record<Lang, { label: string; code: string; note?: string }> {
+  return {
   nextjs: {
     label: "Next.js / Node",
     code: `import OpenAI from "openai";
 
 const client = new OpenAI({
-  baseURL: "http://localhost:3334/v1",
-  apiKey: "dummy",              // ไม่ต้องใช้ key จริง
+  baseURL: "${base}",
+  apiKey: "${key}",
 });
 
 // auto — gateway เลือก model ที่ดีที่สุดให้
@@ -123,8 +115,8 @@ for await (const chunk of stream) {
     code: `from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:3334/v1",
-    api_key="dummy",            # ไม่ต้องใช้ key จริง
+    base_url="${base}",
+    api_key="${key}",
 )
 
 chat = client.chat.completions.create(
@@ -145,16 +137,18 @@ for chunk in stream:
   },
   curl: {
     label: "cURL",
-    code: `curl http://localhost:3334/v1/chat/completions \\
+    code: `curl ${base}/chat/completions \\
   -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${key}" \\
   -d '{
     "model": "sml/auto",
     "messages": [{"role": "user", "content": "สวัสดีครับ"}]
   }'
 
 # streaming
-curl http://localhost:3334/v1/chat/completions \\
+curl ${base}/chat/completions \\
   -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${key}" \\
   -d '{
     "model": "sml/auto",
     "messages": [{"role": "user", "content": "เล่านิทานสั้นๆ"}],
@@ -166,8 +160,8 @@ curl http://localhost:3334/v1/chat/completions \\
     code: `from langchain_openai import ChatOpenAI
 
 llm = ChatOpenAI(
-    base_url="http://localhost:3334/v1",
-    api_key="dummy",
+    base_url="${base}",
+    api_key="${key}",
     model="sml/auto",
 )
 
@@ -187,6 +181,42 @@ result = llm_with_tools.invoke("กรุงเทพอากาศเป็น
 print(result.tool_calls)`,
     note: "pip install langchain-openai",
   },
+  hermes: {
+    label: "Hermes Agent",
+    code: `# Hermes Agent (Nous Research) — self-improving open-source AI agent
+# Install: https://github.com/nousresearch/hermes-agent
+
+# Method 1: Quick switch via CLI (no config edit)
+hermes model add sml-gateway \\
+  --provider custom \\
+  --base-url ${base} \\
+  --api-key ${key} \\
+  --default-model sml/auto
+
+hermes model use sml-gateway
+
+# Method 2: Edit ~/.hermes/config.toml directly
+# (Hermes uses base_url precedence — if set, it ignores \`provider\` built-ins)
+cat >> ~/.hermes/config.toml <<'EOF'
+[model]
+provider = "custom"
+base_url = "${base}"
+api_key_env = "SML_GATEWAY_KEY"
+model = "sml/auto"
+
+[model.fallback]
+provider = "custom"
+base_url = "${base}"
+model = "sml/thai"
+EOF
+
+# Set the key in ~/.hermes/.env
+echo 'SML_GATEWAY_KEY=${key}' >> ~/.hermes/.env
+
+# Run the agent — it will route every call through SMLGateway
+hermes "refactor this repo to use async/await"`,
+    note: "Hermes คือ AI agent ของ Nous Research — base_url override ใช้งานได้เลย",
+  },
   openclaw: {
     label: "OpenClaw",
     code: `# Docker — OpenClaw อยู่คนละ container
@@ -194,9 +224,9 @@ docker exec <openclaw-container> \\
   openclaw onboard \\
   --non-interactive --accept-risk \\
   --auth-choice custom-api-key \\
-  --custom-base-url http://host.docker.internal:3334/v1 \\
+  --custom-base-url ${base.replace("localhost", "host.docker.internal")} \\
   --custom-model-id sml/auto \\
-  --custom-api-key dummy \\
+  --custom-api-key ${key} \\
   --custom-compatibility openai \\
   --skip-channels --skip-daemon \\
   --skip-health --skip-search \\
@@ -206,9 +236,9 @@ docker exec <openclaw-container> \\
 openclaw onboard \\
   --non-interactive --accept-risk \\
   --auth-choice custom-api-key \\
-  --custom-base-url http://localhost:3334/v1 \\
+  --custom-base-url ${base} \\
   --custom-model-id sml/auto \\
-  --custom-api-key dummy \\
+  --custom-api-key ${key} \\
   --custom-compatibility openai \\
   --skip-channels --skip-daemon \\
   --skip-health --skip-search \\
@@ -217,8 +247,8 @@ openclaw onboard \\
   },
   any: {
     label: "ทุก Framework",
-    code: `Endpoint:    http://localhost:3334/v1/chat/completions
-API Key:     dummy   (ใส่อะไรก็ได้ ไม่มี auth)
+    code: `Endpoint:    ${base}/chat/completions
+API Key:     ${key}
 Model:       sml/auto  (หรือเลือก model เฉพาะ)
 
 รองรับ:
@@ -256,14 +286,28 @@ Dev controls (headers):
   Dify:           Custom Model Provider → OpenAI-compatible
   LobeChat:       Settings → OpenAI → Base URL
   AutoGen:        config_list: [{ base_url, api_key: "dummy" }]
-  Continue.dev:   models: [{ provider: "openai", apiBase, apiKey: "dummy" }]`,
+  Continue.dev:   models: [{ provider: "openai", apiBase, apiKey: "${key}" }]`,
   },
-};
+  };
+}
 
 function QuickConnect() {
   const [lang, setLang] = useState<Lang>("nextjs");
   const [copied, setCopied] = useState(false);
-  const snippet = SNIPPETS[lang];
+  // Detect origin — production shows the real domain + Bearer hint,
+  // local dev keeps the familiar localhost:3334
+  const [apiBase, setApiBase] = useState("http://localhost:3334/v1");
+  const [isProd, setIsProd] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const o = window.location.origin;
+    const prod = !/localhost|127\.0\.0\.1|0\.0\.0\.0/.test(o);
+    setIsProd(prod);
+    setApiBase(prod ? `${o}/v1` : "http://localhost:3334/v1");
+  }, []);
+  const keyPlaceholder = isProd ? "<GATEWAY_API_KEY>" : "dummy";
+  const snippets = buildSnippets(apiBase, keyPlaceholder);
+  const snippet = snippets[lang];
 
   const copy = () => {
     navigator.clipboard.writeText(snippet.code).then(() => {
@@ -272,14 +316,14 @@ function QuickConnect() {
     });
   };
 
-  const tabs: Lang[] = ["nextjs", "python", "curl", "langchain", "openclaw", "any"];
+  const tabs: Lang[] = ["nextjs", "python", "curl", "langchain", "hermes", "openclaw", "any"];
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         {[
-          { label: "Base URL", value: "http://localhost:3334/v1", color: "text-indigo-300" },
-          { label: "API Key", value: "dummy (ใส่อะไรก็ได้)", color: "text-amber-300" },
+          { label: "Base URL", value: apiBase, color: "text-indigo-300" },
+          { label: "API Key", value: isProd ? "Bearer <key จาก owner>" : "dummy (local ไม่เช็ค)", color: "text-amber-300" },
           { label: "Model", value: "sml/auto", color: "text-emerald-300" },
         ].map((info) => (
           <div key={info.label} className="bg-black/30 rounded-lg px-3 py-2 border border-white/5">
@@ -300,7 +344,7 @@ function QuickConnect() {
                 : "text-gray-400 border-white/10 hover:bg-white/5 hover:text-white"
             }`}
           >
-            {SNIPPETS[t].label}
+            {snippets[t].label}
           </button>
         ))}
       </div>
@@ -340,7 +384,21 @@ const NAV = [
   { id: "troubleshoot", label: "แก้ปัญหา" },
 ];
 
+// Shared hook: every Code block swaps in the real server origin so docs stay
+// accurate when we move the droplet / domain / add more replicas.
+function useApiBase() {
+  const [base, setBase] = useState<string>("http://localhost:3334");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const o = window.location.origin;
+    const prod = !/localhost|127\.0\.0\.1|0\.0\.0\.0/.test(o);
+    setBase(prod ? o : "http://localhost:3334");
+  }, []);
+  return base;
+}
+
 export default function GuidePage() {
+  const apiBase = useApiBase();
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* Top bar */}
@@ -381,20 +439,22 @@ export default function GuidePage() {
           <div className="text-5xl mb-3">&#128218;</div>
           <h1 className="text-4xl font-black text-white mb-2">คู่มือ SMLGateway</h1>
           <p className="text-sm text-gray-400 max-w-2xl mx-auto leading-relaxed">
-            AI Gateway ที่รวม 26 ผู้ให้บริการ AI ฟรีไว้ที่เดียว — OpenAI-compatible API
-            เชื่อมต่อได้ทุก framework ใช้งานผ่าน <InlineCode>sml/auto</InlineCode> ระบบเลือก model ที่ดีที่สุดให้อัตโนมัติ
+            AI Gateway รวมผู้ให้บริการ AI ฟรี 30+ เจ้าไว้ที่เดียว — OpenAI-compatible API
+            เชื่อมต่อ OpenAI SDK, LangChain, Hermes Agent, OpenClaw ได้ทุก framework
+            ใช้ <InlineCode>sml/auto</InlineCode> ระบบเลือก model ที่ดีที่สุดให้อัตโนมัติ
           </p>
         </div>
 
-        <Warn>
-          <strong>ใช้งาน local เท่านั้น</strong> — ระบบไม่มี authentication ห้าม expose ออก internet
-          (ถ้า traffic ทั้งหมดออกจาก IP เดียว provider จะ lock IP ทั้งหมด)
-        </Warn>
+        <Info>
+          <strong>Local</strong>: ไม่มี auth ใช้ <InlineCode>apiKey: &quot;dummy&quot;</InlineCode> ได้เลย &middot;{" "}
+          <strong>Production</strong>: ต้องใช้ Bearer key (<InlineCode>GATEWAY_API_KEY</InlineCode> จาก owner)
+          หรือ login ด้วย Google เข้าใช้ UI อย่างเดียว — endpoint <InlineCode>/v1/*</InlineCode> จำกัดเฉพาะ owner
+        </Info>
 
         <Section id="quick-connect" icon="&#9889;" title="เชื่อมต่อเร็ว">
           <P>
             SMLGateway เป็น OpenAI-compatible API — client library ทุกตัวที่ใช้ OpenAI SDK ได้
-            ชี้ <InlineCode>baseURL</InlineCode> มาที่ <InlineCode>http://localhost:3334/v1</InlineCode> ก็ใช้ได้ทันที
+            ชี้ <InlineCode>baseURL</InlineCode> มาที่ <InlineCode>${apiBase}/v1</InlineCode> ก็ใช้ได้ทันที
           </P>
           <QuickConnect />
         </Section>
@@ -497,7 +557,7 @@ cp .env.example .env.local`}</Code>
           </Step>
           <Step num={3} title="Build + Start">
             <Code>{`docker compose up -d --build`}</Code>
-            <P>รอ build ครั้งแรก 3-10 นาที จากนั้นเปิด <InlineCode>http://localhost:3334/</InlineCode></P>
+            <P>รอ build ครั้งแรก 3-10 นาที จากนั้นเปิด <InlineCode>${apiBase}/</InlineCode></P>
           </Step>
           <Step num={4} title="ใส่ API keys ผ่าน Dashboard">
             <P>
@@ -540,7 +600,7 @@ docker compose up -d --build`}</Code>
           <Code>{`openclaw onboard \\
   --non-interactive --accept-risk \\
   --auth-choice custom-api-key \\
-  --custom-base-url http://localhost:3334/v1 \\
+  --custom-base-url ${apiBase}/v1 \\
   --custom-model-id sml/auto \\
   --custom-api-key dummy \\
   --custom-compatibility openai \\
@@ -579,7 +639,7 @@ docker compose up -d --build`}</Code>
     "bind": "lan",
     "allowedOrigins": [
       "http://host.docker.internal:3334",
-      "http://localhost:3334"
+      "${apiBase}"
     ]
   }
 }`}</Code>
@@ -647,7 +707,7 @@ docker compose up -d --build`}</Code>
           </div>
 
           <SubTitle>ตัวอย่าง: Vision (ส่งรูป)</SubTitle>
-          <Code>{`curl http://localhost:3334/v1/chat/completions \\
+          <Code>{`curl ${apiBase}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "sml/auto",
@@ -661,7 +721,7 @@ docker compose up -d --build`}</Code>
   }'`}</Code>
 
           <SubTitle>ตัวอย่าง: Tool Calling</SubTitle>
-          <Code>{`curl http://localhost:3334/v1/chat/completions \\
+          <Code>{`curl ${apiBase}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "sml/tools",
@@ -692,10 +752,10 @@ docker compose up -d --build`}</Code>
             หา model ที่เก่งด้านที่ต้องการ — category, context, tools support ฯลฯ
           </P>
           <Code>{`# หา model ภาษาไทยที่รับ context 200K+ ท็อป 3
-curl "http://localhost:3334/v1/models/search?category=thai&min_context=200000&top=3"
+curl "${apiBase}/v1/models/search?category=thai&min_context=200000&top=3"
 
 # หา model tools calling
-curl "http://localhost:3334/v1/models/search?category=code&supports_tools=1&top=5"`}</Code>
+curl "${apiBase}/v1/models/search?category=code&supports_tools=1&top=5"`}</Code>
           <P>
             Query params: <InlineCode>category</InlineCode> (thai/code/tools/vision/math/
             reasoning/json/instruction/extraction/classification/comprehension/safety),
@@ -709,7 +769,7 @@ curl "http://localhost:3334/v1/models/search?category=code&supports_tools=1&top=
           <P>
             ยิง prompt เดียวไปหลาย model พร้อมกัน → เปรียบเทียบ content + latency
           </P>
-          <Code>{`curl -X POST http://localhost:3334/v1/compare \\
+          <Code>{`curl -X POST ${apiBase}/v1/compare \\
   -H "Content-Type: application/json" \\
   -d '{
     "messages": [{"role":"user","content":"อธิบาย recursion"}],
@@ -727,7 +787,7 @@ curl "http://localhost:3334/v1/models/search?category=code&supports_tools=1&top=
             ต้องการ JSON ตาม schema ที่กำหนด — ระบบ validate + retry (default 2 ครั้ง) ให้
             ไม่ต้องเขียน parse/retry logic เอง
           </P>
-          <Code>{`curl -X POST http://localhost:3334/v1/structured \\
+          <Code>{`curl -X POST ${apiBase}/v1/structured \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "sml/auto",
@@ -751,21 +811,21 @@ curl "http://localhost:3334/v1/models/search?category=code&supports_tools=1&top=
             เก็บ system prompt ยาวๆ ไว้เรียกใช้ด้วยชื่อ — ไม่ต้องฝังใน client code
           </P>
           <Code>{`# สร้าง
-curl -X POST http://localhost:3334/v1/prompts \\
+curl -X POST ${apiBase}/v1/prompts \\
   -H "Content-Type: application/json" \\
   -d '{"name":"pirate","content":"You are a pirate. Short answers only.","description":"Pirate persona"}'
 
 # ใช้ในแชท — แค่ใส่ "prompt": "pirate"
-curl -X POST http://localhost:3334/v1/chat/completions \\
+curl -X POST ${apiBase}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -d '{"model":"sml/auto","prompt":"pirate","messages":[{"role":"user","content":"how to fish"}]}'
 
 # รายการทั้งหมด
-curl http://localhost:3334/v1/prompts
+curl ${apiBase}/v1/prompts
 
 # แก้ไข / ลบ
-curl -X PUT    http://localhost:3334/v1/prompts/pirate -d '{...}'
-curl -X DELETE http://localhost:3334/v1/prompts/pirate`}</Code>
+curl -X PUT    ${apiBase}/v1/prompts/pirate -d '{...}'
+curl -X DELETE ${apiBase}/v1/prompts/pirate`}</Code>
 
           <SubTitle>5. Trace — Debug Request ย้อนหลัง</SubTitle>
           <P>
@@ -773,16 +833,16 @@ curl -X DELETE http://localhost:3334/v1/prompts/pirate`}</Code>
             trace endpoint ดูได้ว่าเกิดอะไรกับ request นั้นๆ
           </P>
           <Code>{`# ยิง chat ธรรมดา
-curl -D - http://localhost:3334/v1/chat/completions \\
+curl -D - ${apiBase}/v1/chat/completions \\
   -d '{"model":"sml/auto","messages":[{"role":"user","content":"hi"}]}'
 # → response headers มี: X-SMLGateway-Request-Id: 5m3obi
 
 # ดู trace
-curl http://localhost:3334/v1/trace/5m3obi
+curl ${apiBase}/v1/trace/5m3obi
 # → { requestId, found, entry: { resolved_model, provider, latency_ms, input_tokens, ... } }`}</Code>
 
           <SubTitle>6. Usage Stats ของ IP ตัวเอง</SubTitle>
-          <Code>{`curl "http://localhost:3334/api/my-stats?window=24h"
+          <Code>{`curl "${apiBase}/api/my-stats?window=24h"
 # → { total, success, p50_latency_ms, p95_latency_ms, p99_latency_ms,
 #     top_models: [...], by_hour: [...] }
 # window: 1h | 6h | 24h | 7d | 30d`}</Code>
@@ -807,7 +867,7 @@ curl http://localhost:3334/v1/trace/5m3obi
               </tbody>
             </table>
           </div>
-          <Code>{`curl -X POST http://localhost:3334/v1/chat/completions \\
+          <Code>{`curl -X POST ${apiBase}/v1/chat/completions \\
   -H "X-SMLGateway-Prefer: groq,cerebras" \\
   -H "X-SMLGateway-Exclude: mistral" \\
   -H "X-SMLGateway-Strategy: fastest" \\
@@ -853,9 +913,9 @@ curl http://localhost:3334/v1/trace/5m3obi
           <ul className="list-disc list-inside space-y-1 text-sm text-gray-300">
             <li>Docker Desktop เปิดอยู่ไหม? (ไอคอนวาฬสีเขียว)</li>
             <li>Container health ไหม? <InlineCode>docker ps --filter name=sml-gateway</InlineCode></li>
-            <li>เปิด <InlineCode>http://localhost:3334/</InlineCode> เห็น dashboard ไหม?</li>
+            <li>เปิด <InlineCode>${apiBase}/</InlineCode> เห็น dashboard ไหม?</li>
             <li>Worker สแกนเสร็จไหม? มี model พร้อมใช้กี่ตัว? (ดูจาก dashboard &ldquo;คณะครู&rdquo;)</li>
-            <li>ทดสอบ: <InlineCode>curl http://localhost:3334/v1/models</InlineCode> ตอบ list กลับไหม?</li>
+            <li>ทดสอบ: <InlineCode>curl ${apiBase}/v1/models</InlineCode> ตอบ list กลับไหม?</li>
             <li>ถ้า Docker: base URL เป็น <InlineCode>host.docker.internal:3334</InlineCode> ไหม?</li>
           </ul>
 
@@ -865,11 +925,11 @@ curl http://localhost:3334/v1/trace/5m3obi
             ต้องใช้ได้ตามปกติ — ตรวจสอบได้เลย:
           </P>
           <Code>{`# virtual models (sml/auto, sml/fast, sml/tools, sml/thai, sml/consensus)
-curl http://localhost:3334/v1/models/sml/tools
+curl ${apiBase}/v1/models/sml/tools
 # → { "id": "sml/tools", "object": "model", ... }
 
 # provider/model format
-curl http://localhost:3334/v1/models/groq/llama-3.3-70b-versatile
+curl ${apiBase}/v1/models/groq/llama-3.3-70b-versatile
 # → { "id": "groq/llama-3.3-70b-versatile", ... }
 
 # ถ้าได้ HTML หรือ 404 — ให้ rebuild container

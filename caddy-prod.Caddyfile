@@ -1,0 +1,43 @@
+{
+	admin off
+	# In production the request chain is:
+	#   client -> Cloudflare -> origin Caddy (host :80 -> localhost:8335)
+	#                        -> in-compose Caddy (this file, port :80)
+	#                        -> sml-gateway:3000
+	# The in-compose Caddy receives traffic from the Docker bridge (172.x.x.x)
+	# after the host -> container port forward, so trust private ranges.
+	# Origin Caddy is responsible for: (a) stripping inbound spoofed headers,
+	# (b) rewriting X-Forwarded-For from Cloudflare's CF-Connecting-IP.
+	servers {
+		trusted_proxies static private_ranges
+		client_ip_headers X-Forwarded-For X-Real-IP
+	}
+}
+
+:80 {
+	reverse_proxy sml-gateway:3000 {
+		lb_policy round_robin
+		health_uri /api/health
+		health_interval 10s
+		health_timeout 5s
+		health_status 200
+		# Forward the real client IP derived from trusted headers
+		header_up X-Forwarded-For {client_ip}
+		header_up X-Real-IP {client_ip}
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 300s
+		}
+	}
+
+	encode gzip
+
+	header {
+		-Server
+		# Tighten CORS at the origin — broad CORS is already applied upstream.
+		# If the gateway is being called from browsers on other origins, adjust here.
+	}
+
+	@options method OPTIONS
+	respond @options 204
+}

@@ -15,6 +15,16 @@ interface CatalogRow {
   homepage: string | null;
   source: string;
   free_tier: boolean;
+  notes: string | null;
+  models_url: string | null;
+  auth_scheme: string | null;
+  homepage_ok: boolean | null;
+  homepage_status_code: number | null;
+  models_ok: boolean | null;
+  models_status_code: number | null;
+  verify_notes: string | null;
+  last_verified_at: Date | null;
+  public_models_count: number | null;
 }
 
 export async function GET(req: NextRequest) {
@@ -52,13 +62,19 @@ export async function GET(req: NextRequest) {
     // OR/HF/pattern discovered → ดูใน Catalog panel แยก
     const catalogRows = includeAll
       ? await sql<CatalogRow[]>`
-          SELECT name, label, env_var, homepage, source, free_tier
+          SELECT name, label, env_var, homepage, source, free_tier, notes,
+                 models_url, auth_scheme, homepage_ok, homepage_status_code,
+                 models_ok, models_status_code, verify_notes, last_verified_at,
+                 public_models_count
           FROM provider_catalog
           WHERE status = 'active'
           ORDER BY source = 'seed' DESC, name
         `
       : await sql<CatalogRow[]>`
-          SELECT name, label, env_var, homepage, source, free_tier
+          SELECT name, label, env_var, homepage, source, free_tier, notes,
+                 models_url, auth_scheme, homepage_ok, homepage_status_code,
+                 models_ok, models_status_code, verify_notes, last_verified_at,
+                 public_models_count
           FROM provider_catalog
           WHERE status = 'active' AND source IN ('seed', 'manual')
           ORDER BY source = 'seed' DESC, name
@@ -93,6 +109,16 @@ export async function GET(req: NextRequest) {
         homepage: c.homepage ?? "",
         source: c.source,
         freeTier: c.free_tier,
+        notes: c.notes ?? "",
+        modelsUrl: c.models_url ?? "",
+        authScheme: c.auth_scheme ?? "bearer",
+        homepageOk: c.homepage_ok,
+        homepageStatusCode: c.homepage_status_code,
+        modelsOk: c.models_ok,
+        modelsStatusCode: c.models_status_code,
+        verifyNotes: c.verify_notes ?? "",
+        lastVerifiedAt: c.last_verified_at ? c.last_verified_at.toISOString() : null,
+        publicModelsCount: c.public_models_count,
         hasKey,
         hasDbKey,
         noKeyRequired,

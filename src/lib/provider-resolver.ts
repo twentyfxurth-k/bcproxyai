@@ -27,6 +27,7 @@ const CACHE_TTL_MS = 30_000;
 
 // Hardcoded ENV_MAP — fallback (must match api-keys.ts)
 const HARDCODED_ENV_MAP: Record<string, string> = {
+  typhoon: "TYPHOON_API_KEY",
   openrouter: "OPENROUTER_API_KEY", kilo: "KILO_API_KEY", google: "GOOGLE_AI_API_KEY",
   groq: "GROQ_API_KEY", cerebras: "CEREBRAS_API_KEY", sambanova: "SAMBANOVA_API_KEY",
   mistral: "MISTRAL_API_KEY", ollama: "OLLAMA_API_KEY", github: "GITHUB_MODELS_TOKEN",

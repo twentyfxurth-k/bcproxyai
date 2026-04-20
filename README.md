@@ -3,9 +3,24 @@
 **OpenAI-compatible LLM gateway ที่รวมโมเดลฟรีจากหลาย provider ไว้จุดเดียว**
 ระบบเรียนรู้จากการใช้งานเอง — ไม่ต้อง tune ด้วยมือ ยิ่งใช้ยิ่งเลือก route ได้ดี
 
-> ใช้ได้กับทุก client ที่รองรับ OpenAI SDK — Next.js, Python, LangChain, curl, OpenClaw, Aider, Cline ฯลฯ
+> ใช้ได้กับทุก client ที่รองรับ OpenAI SDK — Next.js, Python, LangChain, Hermes Agent, curl, OpenClaw, Aider, Cline ฯลฯ
 
-**Local-only** — ออกแบบให้รันบน Docker Desktop เครื่องเดียว ไม่มี auth / multi-tenant / public deploy (หลีกเลี่ยงปัญหา provider IP lock)
+## Two Deployment Modes
+
+| | **Local** (default) | **Server** (public) |
+|---|---|---|
+| Auth | 🚫 off — open endpoint | ✅ Google OAuth UI + Bearer API keys |
+| Use case | Docker Desktop, single dev | Droplet / VPS, shared team / public |
+| `AUTH_OWNER_EMAIL` | unset | set |
+| `GATEWAY_API_KEY` | unset | set |
+| Client sends | `api_key: "dummy"` | `api_key: "sml_live_..."` |
+| Admin UI | — | `/admin/keys` — issue per-client keys |
+
+**Mode switches automatically** จาก `.env.local`:
+- ถ้าไม่ตั้ง `AUTH_OWNER_EMAIL` / `GATEWAY_API_KEY` → **local mode** (no auth, open endpoint)
+- ถ้าตั้งอย่างน้อย 1 ตัว → **server mode** (auth enforced, `/v1/*` owner-only)
+
+ดูรายละเอียดทุกตัวแปรใน [.env.example](.env.example).
 
 **Stateless** — gateway ไม่เก็บ conversation history / session memory. Client (OpenClaw, Aider, IDE plugin, ฯลฯ) เป็นคนจัดการ history เอง แล้วส่ง `messages[]` array มาทุก request ตามมาตรฐาน OpenAI API. ระบบมีแค่ `semantic_cache` (cache response ตาม embedding similarity) + routing memory (`live_score`, `fail_streak`, category winners) ซึ่งเป็น aggregate stat ไม่ผูกกับ user.
 
@@ -17,7 +32,10 @@
 
 | | |
 |---|---|
-| 🆓 Free-only | 31 providers (free tier เท่านั้น — paid ถูกกรองออก), 300+ models |
+| 🆓 Free-only | 30+ providers (free tier เท่านั้น — paid ถูกกรองออก), 200+ models |
+| 🇹🇭 Thai-native | Typhoon (SCB 10X) เป็น provider ตัวแรก + virtual model `sml/thai` |
+| 🔐 Dual auth | local = no auth; server = OAuth + Bearer key (admin ออก key ได้ที่ `/admin/keys`) |
+| 🔎 Auto-verify | probe homepage + `/v1/models` ของทุก provider ทุก 3 นาที + sync URL ใหม่จาก cheahjs/LiteLLM registry ทุก 6 ชม. |
 | 🌐 Auto-Discovery | สแกน OpenRouter/HuggingFace/URL pattern หา provider ใหม่ทุก 15 นาที (กรอง paid ทิ้ง) |
 | ⚡ Fast | hedge top-3, warmup, semantic cache → p50 ~500ms |
 | 🎯 Smart routing | per-category teacher (thai/code/tools/vision/...) |
@@ -65,15 +83,38 @@ start http://localhost:3334/   # Windows
 start http://localhost:3334/guide
 ```
 
-ยิงทดสอบ:
+**ยิงทดสอบ (local mode — no auth):**
 ```bash
 curl -X POST http://localhost:3334/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"sml/auto","messages":[{"role":"user","content":"สวัสดี"}]}'
 ```
 
-Worker cycle (scan → health → exam → appoint teachers) รันเองทุก 15 นาที
-Warmup worker ping โมเดลที่ผ่านสอบทุก 2 นาที
+### เปิดโหมด Server (public deploy)
+ใน `.env.local` ตั้งค่า 5 ตัว:
+```bash
+AUTH_OWNER_EMAIL=you@gmail.com
+GATEWAY_API_KEY=sk-gw-<32-byte-hex>
+NEXTAUTH_SECRET=<base64 32 bytes>
+NEXTAUTH_URL=https://your-domain.example.com
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+```
+Restart → `/v1/*` จะเปิดเฉพาะสำหรับ:
+- Bearer `GATEWAY_API_KEY` (master)
+- Bearer `sml_live_*` (admin ออกให้ client ที่ `/admin/keys`)
+- Owner Google login (UI อย่างเดียว)
+
+**Worker cycles ที่รันอัตโนมัติ:**
+
+| Loop | Interval | ทำอะไร |
+|---|---|---|
+| main | 15 นาที | discovery + verify + scan + health + exam + teacher |
+| verify | 3 นาที | probe homepage + `/v1/models` ของทุก provider |
+| exam | 5 นาที | สอบ model ที่รอในคิว (ไม่ต้องรอ main cycle) |
+| registry-sync | 6 ชม. | pull cheahjs + LiteLLM registry → auto-patch URL เสีย |
+| warmup | 2 นาที | ping model ที่ผ่านสอบ — connection warm |
+
 Trigger manual: `curl -X POST http://localhost:3334/api/worker`
 
 ---

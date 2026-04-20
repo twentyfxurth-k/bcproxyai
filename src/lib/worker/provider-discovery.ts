@@ -40,41 +40,55 @@ async function logWorker(message: string, level = "info") {
 
 // ─── Seed catalog from code (idempotent) ─────────────────────────────────────
 
-const SEED_NOTES: Record<string, { homepage?: string; freeTier?: boolean; notes?: string }> = {
-  openrouter:   { homepage: "https://openrouter.ai/keys", freeTier: true,  notes: "Aggregator + free tier" },
-  kilo:         { homepage: "https://kilo.ai", freeTier: true, notes: "Free, no key required" },
-  google:       { homepage: "https://aistudio.google.com/apikey", freeTier: true, notes: "Gemini, free tier" },
-  groq:         { homepage: "https://console.groq.com/keys", freeTier: true, notes: "Fastest inference" },
-  cerebras:     { homepage: "https://cloud.cerebras.ai", freeTier: true, notes: "WSE chip" },
-  sambanova:    { homepage: "https://cloud.sambanova.ai", freeTier: true },
-  mistral:      { homepage: "https://console.mistral.ai", freeTier: true },
-  ollama:       { homepage: "https://ollama.com", freeTier: true, notes: "Local, no auth" },
-  github:       { homepage: "https://github.com/marketplace/models", freeTier: true },
-  fireworks:    { homepage: "https://fireworks.ai", freeTier: true },
-  cohere:       { homepage: "https://cohere.com", freeTier: true },
-  cloudflare:   { homepage: "https://workers.cloudflare.com/ai", freeTier: true },
-  huggingface:  { homepage: "https://huggingface.co/inference-endpoints", freeTier: true },
-  nvidia:       { homepage: "https://build.nvidia.com", freeTier: true, notes: "1000 req/mo free" },
-  chutes:       { homepage: "https://chutes.ai", freeTier: true, notes: "Community GPU" },
-  llm7:         { homepage: "https://llm7.io", freeTier: true, notes: "30 RPM free" },
-  scaleway:     { homepage: "https://console.scaleway.com", freeTier: true, notes: "1M tokens free" },
-  pollinations: { homepage: "https://pollinations.ai", freeTier: true, notes: "No key required" },
-  ollamacloud:  { homepage: "https://ollama.com/cloud", freeTier: true, notes: "100 req/hr free" },
-  siliconflow:  { homepage: "https://siliconflow.com", freeTier: true },
-  glhf:         { homepage: "https://glhf.chat", freeTier: true },
-  together:     { homepage: "https://together.ai", freeTier: true },
-  hyperbolic:   { homepage: "https://hyperbolic.xyz", freeTier: true },
-  zai:          { homepage: "https://z.ai", freeTier: true },
-  dashscope:    { homepage: "https://dashscope-intl.aliyuncs.com", freeTier: true, notes: "Qwen — Alibaba" },
-  reka:         { homepage: "https://reka.ai", freeTier: true, notes: "$10 free auto-refresh /month" },
-  deepinfra:    { homepage: "https://deepinfra.com", freeTier: true, notes: "Free credit" },
-  novita:       { homepage: "https://novita.ai", freeTier: true, notes: "Free credit" },
-  monsterapi:   { homepage: "https://monsterapi.ai", freeTier: true },
-  friendli:     { homepage: "https://friendli.ai", freeTier: true, notes: "1M tokens free" },
-  ai21:         { homepage: "https://studio.ai21.com", freeTier: true, notes: "Free trial" },
+// Seed data — initial config for bootstrapping provider_catalog.
+// After seed, the verify worker probes + updates each row, so /api/setup/test
+// and other runtime code reads URLs/auth from DB (not from any hardcoded map).
+type AuthScheme = "bearer" | "query-key" | "none" | "apikey-header";
+interface SeedMeta {
+  homepage?: string;
+  freeTier?: boolean;
+  notes?: string;
+  modelsUrl?: string;        // GET endpoint that lists models (used to test a key)
+  authScheme?: AuthScheme;   // how to pass the API key
+  authHeaderName?: string;   // only for authScheme='apikey-header' (e.g. "apikey")
+}
+const SEED_NOTES: Record<string, SeedMeta> = {
+  typhoon:      { homepage: "https://opentyphoon.ai", freeTier: true, notes: "Thai LLM (SCB 10X) — free research tier, rate-limited", modelsUrl: "https://api.opentyphoon.ai/v1/models", authScheme: "bearer" },
+  openrouter:   { homepage: "https://openrouter.ai/keys", freeTier: true,  notes: "Aggregator + free tier", modelsUrl: "https://openrouter.ai/api/v1/models", authScheme: "bearer" },
+  kilo:         { homepage: "https://kilo.ai", freeTier: true, notes: "Free, no key required", modelsUrl: "https://api.kilo.ai/api/gateway/models", authScheme: "bearer" },
+  google:       { homepage: "https://aistudio.google.com/apikey", freeTier: true, notes: "Gemini, free tier", modelsUrl: "https://generativelanguage.googleapis.com/v1beta/models", authScheme: "query-key" },
+  groq:         { homepage: "https://console.groq.com/keys", freeTier: true, notes: "Fastest inference", modelsUrl: "https://api.groq.com/openai/v1/models", authScheme: "bearer" },
+  cerebras:     { homepage: "https://cloud.cerebras.ai", freeTier: true, notes: "WSE chip", modelsUrl: "https://api.cerebras.ai/v1/models", authScheme: "bearer" },
+  sambanova:    { homepage: "https://cloud.sambanova.ai", freeTier: true, modelsUrl: "https://api.sambanova.ai/v1/models", authScheme: "bearer" },
+  mistral:      { homepage: "https://console.mistral.ai", freeTier: true, modelsUrl: "https://api.mistral.ai/v1/models", authScheme: "bearer" },
+  ollama:       { homepage: "https://ollama.com", freeTier: true, notes: "Local, no auth", modelsUrl: "", authScheme: "none" },
+  github:       { homepage: "https://github.com/marketplace/models", freeTier: true, modelsUrl: "https://models.github.ai/inference/models", authScheme: "bearer" },
+  fireworks:    { homepage: "https://fireworks.ai", freeTier: true, modelsUrl: "https://api.fireworks.ai/inference/v1/models", authScheme: "bearer" },
+  cohere:       { homepage: "https://cohere.com", freeTier: true, modelsUrl: "https://api.cohere.com/v2/models", authScheme: "bearer" },
+  cloudflare:   { homepage: "https://developers.cloudflare.com/workers-ai/", freeTier: true, modelsUrl: "", authScheme: "bearer", notes: "Requires CLOUDFLARE_ACCOUNT_ID — models URL built at runtime" },
+  huggingface:  { homepage: "https://huggingface.co/settings/tokens", freeTier: true, modelsUrl: "https://huggingface.co/api/models?pipeline_tag=text-generation&sort=trending&limit=5", authScheme: "bearer" },
+  nvidia:       { homepage: "https://build.nvidia.com", freeTier: true, notes: "1000 req/mo free", modelsUrl: "https://integrate.api.nvidia.com/v1/models", authScheme: "bearer" },
+  chutes:       { homepage: "https://chutes.ai", freeTier: true, notes: "Community GPU", modelsUrl: "https://llm.chutes.ai/v1/models", authScheme: "bearer" },
+  llm7:         { homepage: "https://llm7.io", freeTier: true, notes: "30 RPM free", modelsUrl: "https://api.llm7.io/v1/models", authScheme: "bearer" },
+  scaleway:     { homepage: "https://console.scaleway.com", freeTier: true, notes: "1M tokens free", modelsUrl: "https://api.scaleway.ai/v1/models", authScheme: "bearer" },
+  pollinations: { homepage: "https://pollinations.ai", freeTier: true, notes: "No key required", modelsUrl: "https://text.pollinations.ai/models", authScheme: "none" },
+  ollamacloud:  { homepage: "https://ollama.com/cloud", freeTier: true, notes: "100 req/hr free", modelsUrl: "https://ollama.com/v1/models", authScheme: "bearer" },
+  siliconflow:  { homepage: "https://siliconflow.com", freeTier: true, modelsUrl: "https://api.siliconflow.cn/v1/models", authScheme: "bearer" },
+  glhf:         { homepage: "https://glhf.chat", freeTier: true, modelsUrl: "https://glhf.chat/api/openai/v1/models", authScheme: "bearer" },
+  together:     { homepage: "https://together.ai", freeTier: true, modelsUrl: "https://api.together.xyz/v1/models", authScheme: "bearer" },
+  hyperbolic:   { homepage: "https://hyperbolic.xyz", freeTier: true, modelsUrl: "https://api.hyperbolic.xyz/v1/models", authScheme: "bearer" },
+  zai:          { homepage: "https://z.ai/manage-apikey/apikey-list", freeTier: true, modelsUrl: "https://api.z.ai/api/paas/v4/chat/completions", authScheme: "bearer", notes: "No list endpoint — chat/completions used for probe" },
+  dashscope:    { homepage: "https://dashscope-intl.console.aliyun.com/apiKey", freeTier: true, notes: "Qwen — Alibaba", modelsUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models", authScheme: "bearer" },
+  reka:         { homepage: "https://platform.reka.ai", freeTier: true, notes: "$10 free auto-refresh /month", modelsUrl: "https://api.reka.ai/v1/models", authScheme: "bearer" },
+  deepinfra:    { homepage: "https://deepinfra.com/dash/api_keys", freeTier: true, notes: "Free credit", modelsUrl: "https://api.deepinfra.com/v1/openai/models", authScheme: "bearer" },
+  novita:       { homepage: "https://novita.ai/settings/key-management", freeTier: true, notes: "Free credit", modelsUrl: "https://api.novita.ai/v3/openai/models", authScheme: "bearer" },
+  monsterapi:   { homepage: "https://monsterapi.ai/signup", freeTier: true, modelsUrl: "https://llm.monsterapi.ai/v1/models", authScheme: "bearer" },
+  friendli:     { homepage: "https://suite.friendli.ai/user-settings/tokens", freeTier: true, notes: "1M tokens free", modelsUrl: "https://api.friendli.ai/dedicated/v1/models", authScheme: "bearer" },
+  ai21:         { homepage: "https://studio.ai21.com/account/api-key", freeTier: true, notes: "Free trial", modelsUrl: "https://api.ai21.com/studio/v1/models", authScheme: "bearer" },
 };
 
 const ENV_BY_PROVIDER: Record<string, string> = {
+  typhoon: "TYPHOON_API_KEY",
   openrouter: "OPENROUTER_API_KEY", kilo: "KILO_API_KEY", google: "GOOGLE_AI_API_KEY",
   groq: "GROQ_API_KEY", cerebras: "CEREBRAS_API_KEY", sambanova: "SAMBANOVA_API_KEY",
   mistral: "MISTRAL_API_KEY", ollama: "OLLAMA_API_KEY", github: "GITHUB_MODELS_TOKEN",
@@ -94,17 +108,26 @@ export async function seedProviderCatalog(): Promise<void> {
   for (const [name, baseUrl] of Object.entries(PROVIDER_URLS)) {
     const meta = SEED_NOTES[name] ?? {};
     await sql`
-      INSERT INTO provider_catalog (name, label, base_url, env_var, homepage, status, source, free_tier, notes)
+      INSERT INTO provider_catalog (name, label, base_url, env_var, homepage, status, source, free_tier, notes,
+        models_url, auth_scheme, auth_header_name)
       VALUES (${name}, ${PROVIDER_LABELS[name] ?? name}, ${baseUrl}, ${ENV_BY_PROVIDER[name] ?? null},
-              ${meta.homepage ?? null}, 'active', 'seed', ${meta.freeTier ?? false}, ${meta.notes ?? null})
+              ${meta.homepage ?? null}, 'active', 'seed', ${meta.freeTier ?? false}, ${meta.notes ?? null},
+              ${meta.modelsUrl ?? null}, ${meta.authScheme ?? "bearer"}, ${meta.authHeaderName ?? null})
       ON CONFLICT (name) DO UPDATE SET
         label = EXCLUDED.label,
         base_url = EXCLUDED.base_url,
         env_var = EXCLUDED.env_var,
-        homepage = COALESCE(EXCLUDED.homepage, provider_catalog.homepage),
+        -- Fallback-only: seed never overwrites a URL that's already set.
+        -- Registry sync / manual edits / verify patches are source of truth
+        -- once a row exists. (Fixes bug where cloudflare homepage kept getting
+        -- reset to a dead URL from the hardcoded seed table.)
+        homepage = COALESCE(provider_catalog.homepage, EXCLUDED.homepage),
         status = CASE WHEN provider_catalog.status = 'paused' THEN 'paused' ELSE 'active' END,
         free_tier = EXCLUDED.free_tier,
-        notes = COALESCE(EXCLUDED.notes, provider_catalog.notes),
+        notes = COALESCE(provider_catalog.notes, EXCLUDED.notes),
+        models_url = COALESCE(provider_catalog.models_url, EXCLUDED.models_url),
+        auth_scheme = COALESCE(provider_catalog.auth_scheme, EXCLUDED.auth_scheme),
+        auth_header_name = COALESCE(provider_catalog.auth_header_name, EXCLUDED.auth_header_name),
         updated_at = now()
     `;
   }
