@@ -843,6 +843,17 @@ async function fetchTyphoonModels(): Promise<ModelRow[]> {
   });
 }
 
+async function fetchThaiLLMModels(): Promise<ModelRow[]> {
+  // ThaiLLM national platform — unified endpoint for 4 Thai-developed models
+  // (OpenThaiGPT/AIEAT, Typhoon-S/SCB 10X, Pathumma/NECTEC, THaLLE/KBTG)
+  return fetchGenericOpenAI({
+    provider: "thaillm",
+    envKeyName: "THAILLM_API_KEY",
+    modelsUrl: "https://api.thaillm.or.th/v1/models",
+    defaultContext: 32_768,
+  });
+}
+
 async function fetchHuggingFaceModels(): Promise<ModelRow[]> {
   const token = getNextApiKey("huggingface");
   if (!token) return [];
@@ -919,7 +930,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     cloudflareModels, hfModels, nvidiaModels,
     chutesModels, llm7Models, scalewayModels, pollinationsModels, ollamaCloudModels,
     siliconflowModels, glhfModels, togetherModels, hyperbolicModels,
-    zaiModels, dashscopeModels, rekaModels, typhoonModels,
+    zaiModels, dashscopeModels, rekaModels, typhoonModels, thaillmModels,
   ] = await Promise.all([
     guard("openrouter", fetchOpenRouterModels),
     guard("kilo", fetchKiloModels),
@@ -948,6 +959,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     guard("dashscope", fetchDashScopeModels),
     guard("reka", fetchRekaModels),
     guard("typhoon", fetchTyphoonModels),
+    guard("thaillm", fetchThaiLLMModels),
   ]);
 
   const allModels = [
@@ -956,7 +968,7 @@ export async function scanModels(): Promise<{ found: number; new: number; disapp
     ...cloudflareModels, ...hfModels, ...nvidiaModels,
     ...chutesModels, ...llm7Models, ...scalewayModels, ...pollinationsModels, ...ollamaCloudModels,
     ...siliconflowModels, ...glhfModels, ...togetherModels, ...hyperbolicModels,
-    ...zaiModels, ...dashscopeModels, ...rekaModels, ...typhoonModels,
+    ...zaiModels, ...dashscopeModels, ...rekaModels, ...typhoonModels, ...thaillmModels,
   ];
   const foundIds = new Set(allModels.map(m => m.id));
   let newCount = 0;

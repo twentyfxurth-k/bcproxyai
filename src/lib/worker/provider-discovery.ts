@@ -53,6 +53,7 @@ interface SeedMeta {
   authHeaderName?: string;   // only for authScheme='apikey-header' (e.g. "apikey")
 }
 const SEED_NOTES: Record<string, SeedMeta> = {
+  thaillm:      { homepage: "https://playground.thaillm.or.th", freeTier: true, notes: "Thai LLM national platform (NSTDA/MHESI) — 4 โมเดลของคนไทย: OpenThaiGPT, Typhoon-S, Pathumma, THaLLE", modelsUrl: "https://api.thaillm.or.th/v1/models", authScheme: "bearer" },
   typhoon:      { homepage: "https://opentyphoon.ai", freeTier: true, notes: "Thai LLM (SCB 10X) — free research tier, rate-limited", modelsUrl: "https://api.opentyphoon.ai/v1/models", authScheme: "bearer" },
   openrouter:   { homepage: "https://openrouter.ai/keys", freeTier: true,  notes: "Aggregator + free tier", modelsUrl: "https://openrouter.ai/api/v1/models", authScheme: "bearer" },
   kilo:         { homepage: "https://kilo.ai", freeTier: true, notes: "Free, no key required", modelsUrl: "https://api.kilo.ai/api/gateway/models", authScheme: "bearer" },
@@ -88,6 +89,7 @@ const SEED_NOTES: Record<string, SeedMeta> = {
 };
 
 const ENV_BY_PROVIDER: Record<string, string> = {
+  thaillm: "THAILLM_API_KEY",
   typhoon: "TYPHOON_API_KEY",
   openrouter: "OPENROUTER_API_KEY", kilo: "KILO_API_KEY", google: "GOOGLE_AI_API_KEY",
   groq: "GROQ_API_KEY", cerebras: "CEREBRAS_API_KEY", sambanova: "SAMBANOVA_API_KEY",

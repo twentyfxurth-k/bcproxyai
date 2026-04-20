@@ -846,6 +846,18 @@ async function askModel(
     reqBody.tool_choice = "auto";
   }
 
+  // Enable reasoning/thinking mode for models that support it. Different
+  // providers expose the toggle differently — we set the union of known
+  // parameter names; unsupported ones are harmlessly ignored by providers
+  // that follow the OpenAI spec (extra JSON fields = passthrough).
+  const idLower = modelId.toLowerCase();
+  const isThinking = /(^|[-_/.])(think|thinking|reason|reasoning|r1|o1|o3|o4|qwen3|deepseek-r|magistral)([-_/.]|$)/i.test(idLower);
+  if (isThinking) {
+    reqBody.reasoning = { effort: "medium" };    // OpenRouter / Anthropic style
+    reqBody.enable_thinking = true;                // Qwen3 / DashScope style
+    reqBody.max_tokens = 2000;                     // thinking needs room
+  }
+
   const start = Date.now();
   try {
     const res = await fetch(url, {
