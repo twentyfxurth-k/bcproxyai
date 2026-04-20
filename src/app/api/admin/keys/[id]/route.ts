@@ -1,11 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revokeKey, setEnabled, invalidateVerifyCache } from "@/lib/gateway-keys";
+import { auth } from "../../../../../../auth";
+import { isOwnerEmail, hasOwners } from "@/lib/admin-emails";
 
 export const dynamic = "force-dynamic";
 
-// Middleware already enforces master-Bearer on /api/admin/* — no extra check.
+async function isAllowed(req: NextRequest): Promise<boolean> {
+  const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  const master = (process.env.GATEWAY_API_KEY ?? "").trim();
+  if (bearer && master && bearer === master) return true;
+  try {
+    const session = (await auth()) as { user?: { email?: string | null } } | null;
+    const email = session?.user?.email ?? "";
+    if (email && isOwnerEmail(email)) return true;
+  } catch { /* ignore */ }
+  if (!hasOwners() && !master) return true; // local mode
+  return false;
+}
 
-export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  if (!(await isAllowed(req))) return NextResponse.json({ error: "owner only" }, { status: 401 });
   const { id } = await ctx.params;
   const n = Number(id);
   if (!Number.isInteger(n) || n <= 0) {
@@ -21,6 +35,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
 }
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  if (!(await isAllowed(req))) return NextResponse.json({ error: "owner only" }, { status: 401 });
   const { id } = await ctx.params;
   const n = Number(id);
   if (!Number.isInteger(n) || n <= 0) {

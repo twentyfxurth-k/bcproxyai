@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifyKey as verifyGatewayKey } from "@/lib/gateway-keys";
-import { hasOwners } from "@/lib/admin-emails";
+import { hasOwners, isOwnerEmail } from "@/lib/admin-emails";
+import { auth } from "../auth";
 
 // Auth model (kept as simple as possible — no browser OAuth):
 //   • Local mode   = GATEWAY_API_KEY unset AND AUTH_OWNER_EMAIL unset → open
@@ -51,10 +52,15 @@ export async function proxy(req: NextRequest) {
     Boolean(presented && presented.startsWith("sml_live_")) &&
     (await verifyGatewayKey(presented));
 
-  // /api/admin/* → master only
+  // /api/admin/* → master Bearer OR owner Google session
   if (isAdminApi) {
     if (isMaster) return NextResponse.next();
-    return json({ error: { message: "admin: master key required", type: "auth_error" } }, 401);
+    try {
+      const session = (await auth()) as { user?: { email?: string | null } } | null;
+      const email = session?.user?.email ?? "";
+      if (email && isOwnerEmail(email)) return NextResponse.next();
+    } catch { /* fall through */ }
+    return json({ error: { message: "admin: owner login or master key required", type: "auth_error" } }, 401);
   }
 
   // /v1/* → master or sml_live_*
@@ -66,10 +72,15 @@ export async function proxy(req: NextRequest) {
     );
   }
 
-  // Mutating /api/* (setup, etc) → master only; GET /api/* is open for the UI
+  // Mutating /api/* (setup, etc) → master Bearer OR owner Google session
   if (isMutatingApi) {
     if (isMaster) return NextResponse.next();
-    return json({ error: { message: "admin: master key required", type: "auth_error" } }, 401);
+    try {
+      const session = (await auth()) as { user?: { email?: string | null } } | null;
+      const email = session?.user?.email ?? "";
+      if (email && isOwnerEmail(email)) return NextResponse.next();
+    } catch { /* fall through */ }
+    return json({ error: { message: "admin: owner login or master key required", type: "auth_error" } }, 401);
   }
 
   // All pages + GET /api/* are open — UI is meant to be viewable.

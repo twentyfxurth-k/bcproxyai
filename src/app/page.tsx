@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { NavSessionChip } from "../components/NavSessionChip";
 
 /** Parse user message — handle legacy JSON array format from DB */
 function parseUserMsg(raw: string | null | undefined): string | null {
@@ -232,10 +233,11 @@ export default function Dashboard() {
               </span>
             </div>
             <div className="flex items-center gap-2">
+              <NavSessionChip />
               <a
                 href="/admin/keys"
                 className="px-3 py-1.5 rounded-lg text-amber-300 hover:text-amber-200 hover:bg-amber-500/10 border border-amber-500/30 transition-colors text-xs"
-                title="จัดการ API Key ของ gateway (owner only)"
+                title="จัดการ API Key ของ gateway (admin only)"
               >
                 <span className="mr-1">🔑</span>
                 API Keys
