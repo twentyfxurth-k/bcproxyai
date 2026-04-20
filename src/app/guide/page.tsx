@@ -378,6 +378,7 @@ const NAV = [
   { id: "models", label: "โมเดลพิเศษ" },
   { id: "install", label: "ติดตั้ง" },
   { id: "openclaw", label: "OpenClaw" },
+  { id: "hermes", label: "Hermes Agent" },
   { id: "api", label: "API Reference" },
   { id: "dev-tools", label: "Dev Tools" },
   { id: "benchmark", label: "ระบบสอบ" },
@@ -643,6 +644,79 @@ docker compose up -d --build`}</Code>
     ]
   }
 }`}</Code>
+        </Section>
+
+        <Section id="hermes" icon="&#129422;" title="เชื่อม Hermes Agent">
+          <Info>
+            <a href="https://github.com/NousResearch/hermes-agent" target="_blank" rel="noopener noreferrer" className="underline">Hermes Agent</a>
+            {" "}— self-improving AI agent จาก Nous Research (ปล่อย ก.พ. 2026, ≥95k⭐)
+            มี built-in tools (terminal, file, web search, memory) + เรียนรู้ skill ข้ามเซสชัน
+            เชื่อมกับ SMLGateway ด้วยการตั้ง <InlineCode>base_url</InlineCode> ใน <InlineCode>~/.hermes/config.toml</InlineCode> ตัวเดียว
+          </Info>
+
+          <SubTitle>1. ติดตั้ง Hermes</SubTitle>
+          <P>ต้องมี Python 3.11+ (Windows ใช้ WSL2 เท่านั้น — native ไม่รองรับ)</P>
+          <Code>{`curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+
+# ตรวจว่าติดตั้งสำเร็จ
+hermes --version`}</Code>
+          <P>
+            ทางเลือก manual: <InlineCode>git clone</InlineCode> repo → <InlineCode>python -m venv venv</InlineCode> → <InlineCode>pip install -r requirements.txt</InlineCode> → <InlineCode>python setup.py</InlineCode>
+          </P>
+
+          <SubTitle>2. Config ให้ชี้มา SMLGateway</SubTitle>
+          <P>แก้ <InlineCode>~/.hermes/config.toml</InlineCode> ตรงๆ (base_url override provider built-in เสมอ):</P>
+          <Code>{`# ~/.hermes/config.toml
+[model]
+provider = "custom"
+base_url = "${apiBase}/v1"
+api_key_env = "SML_GATEWAY_KEY"
+model = "sml/auto"
+
+# ถ้าอยาก Thai-first ให้ fallback ไป sml/thai เมื่อ primary ตก
+[model.fallback]
+provider = "custom"
+base_url = "${apiBase}/v1"
+model = "sml/thai"
+
+[agent]
+name = "Hermes"
+memory = true
+skills_dir = "~/.hermes/skills"`}</Code>
+
+          <SubTitle>3. ใส่ API Key</SubTitle>
+          <Code>{`echo 'SML_GATEWAY_KEY=<sml_live_xxxxxxxxxxxx>' >> ~/.hermes/.env
+
+# Local mode (no auth) — ใช้ dummy ได้
+# echo 'SML_GATEWAY_KEY=dummy' >> ~/.hermes/.env`}</Code>
+          <P>Key สร้างได้ที่ <a href="/admin/keys" className="text-indigo-300 hover:underline">/admin/keys</a> (owner only)</P>
+
+          <SubTitle>4. ใช้งาน / เปลี่ยน model</SubTitle>
+          <Code>{`hermes "refactor this repo to use async/await"
+
+# สลับ model ระหว่างใช้งาน (Hermes รองรับ live switch)
+hermes model   # เลือกจาก list
+hermes tools   # เปิด/ปิด built-in tools
+hermes setup   # wizard แก้ทุกอย่างพร้อมกัน`}</Code>
+
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-start gap-2">
+            <span className="text-amber-400 text-lg shrink-0">&#9888;</span>
+            <div className="text-sm text-amber-200 leading-relaxed">
+              <strong>ข้อบังคับ Hermes:</strong> model ต้องมี context ≥ 64k tokens — ถ้าต่ำกว่านั้น
+              Hermes จะ reject ที่ startup. <InlineCode>sml/auto</InlineCode> ของ SMLGateway กรอง context &lt; 32k
+              ทิ้งไปแล้ว ดังนั้นส่วนใหญ่ผ่านเกณฑ์ แต่ถ้า route ไปเจอ model 32k อาจขัด —
+              ใช้ header <InlineCode>X-SMLGateway-Max-Latency</InlineCode> + preset <InlineCode>strongest</InlineCode> ช่วยคัด
+            </div>
+          </div>
+
+          <SubTitle>ตัวเลือก: ใช้ Nous Portal เป็น fallback</SubTitle>
+          <P>
+            ถ้าอยาก dual-provider (SMLGateway เป็นหลัก + Nous Portal เป็น backup) ตั้งใน config.toml:
+          </P>
+          <Code>{`[model.fallback]
+provider = "nous-portal"
+api_key_env = "NOUS_API_KEY"
+model = "Hermes-3-Llama-3.1-405B"`}</Code>
         </Section>
 
         <Section id="api" icon="&#128279;" title="API Reference">
