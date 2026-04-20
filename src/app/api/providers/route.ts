@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
                  models_ok, models_status_code, verify_notes, last_verified_at,
                  public_models_count
           FROM provider_catalog
-          WHERE status = 'active'
+          WHERE status = 'active' AND free_tier = true
           ORDER BY source = 'seed' DESC, name
         `
       : await sql<CatalogRow[]>`
@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
                  models_ok, models_status_code, verify_notes, last_verified_at,
                  public_models_count
           FROM provider_catalog
-          WHERE status = 'active' AND source IN ('seed', 'manual')
+          WHERE status = 'active' AND free_tier = true AND source IN ('seed', 'manual')
           ORDER BY source = 'seed' DESC, name
         `;
 
