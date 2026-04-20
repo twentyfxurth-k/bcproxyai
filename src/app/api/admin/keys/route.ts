@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "../../../../../auth";
 import { createKey, listKeys } from "@/lib/gateway-keys";
+import { isOwnerEmail, hasOwners } from "@/lib/admin-emails";
 
 export const dynamic = "force-dynamic";
 
-const OWNER_EMAIL = (process.env.AUTH_OWNER_EMAIL ?? "").toLowerCase();
-
 // Owner-only guard. Middleware already blocks `/api/*` for non-owners in prod,
-// but local dev (no OWNER_EMAIL set) bypasses middleware — so we re-check here.
+// but local dev (no owners configured) bypasses middleware — so we re-check.
 async function requireOwner() {
-  if (!OWNER_EMAIL) return null; // local: open
+  if (!hasOwners()) return null; // local: open
   const session = await auth();
-  const email = session?.user?.email?.toLowerCase() ?? "";
-  if (email === OWNER_EMAIL) return null;
+  if (isOwnerEmail(session?.user?.email)) return null;
   return NextResponse.json({ error: "owner only" }, { status: 403 });
 }
 

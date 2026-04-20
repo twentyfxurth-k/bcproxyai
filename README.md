@@ -93,7 +93,10 @@ curl -X POST http://localhost:3334/v1/chat/completions \
 ### เปิดโหมด Server (public deploy)
 ใน `.env.local` ตั้งค่า 5 ตัว:
 ```bash
+# Single admin
 AUTH_OWNER_EMAIL=you@gmail.com
+# หรือหลาย admin (คั่น comma)
+# AUTH_OWNER_EMAIL=you@gmail.com,teammate@gmail.com,cto@gmail.com
 GATEWAY_API_KEY=sk-gw-<32-byte-hex>
 NEXTAUTH_SECRET=<base64 32 bytes>
 NEXTAUTH_URL=https://your-domain.example.com

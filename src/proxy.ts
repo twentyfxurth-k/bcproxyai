@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { auth } from "../auth";
 import { verifyKey as verifyGatewayKey } from "@/lib/gateway-keys";
+import { isOwnerEmail, hasOwners } from "@/lib/admin-emails";
 
 const API_KEY = process.env.GATEWAY_API_KEY?.trim() ?? "";
-const OWNER_EMAIL = (process.env.AUTH_OWNER_EMAIL ?? "").toLowerCase();
-const AUTH_ENABLED = Boolean(API_KEY || OWNER_EMAIL);
+const AUTH_ENABLED = Boolean(API_KEY || hasOwners());
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
@@ -55,8 +55,8 @@ export async function proxy(req: NextRequest) {
   }
 
   const session = await auth();
-  const email = session?.user?.email?.toLowerCase() ?? "";
-  const isOwner = Boolean(OWNER_EMAIL && email === OWNER_EMAIL);
+  const email = session?.user?.email ?? "";
+  const isOwner = isOwnerEmail(email);
   const isViewer = Boolean(session?.user && !isOwner);
 
   if (isOwner) return NextResponse.next();

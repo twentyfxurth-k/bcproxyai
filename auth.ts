@@ -1,7 +1,6 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
-
-const OWNER_EMAIL = (process.env.AUTH_OWNER_EMAIL ?? "").toLowerCase();
+import { isOwnerEmail } from "./src/lib/admin-emails";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
@@ -19,8 +18,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async jwt({ token, profile }) {
       if (profile?.email) token.email = profile.email;
-      const email = typeof token.email === "string" ? token.email.toLowerCase() : "";
-      token.role = OWNER_EMAIL && email === OWNER_EMAIL ? "owner" : "viewer";
+      const email = typeof token.email === "string" ? token.email : "";
+      token.role = isOwnerEmail(email) ? "owner" : "viewer";
       return token;
     },
     async session({ session, token }) {
