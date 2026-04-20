@@ -114,6 +114,31 @@ nano /opt/sml-gateway/.env.production
 bash /opt/sml-gateway/scripts/deploy-droplet.sh
 ```
 
+### คู่มือการสมัครใช้ API key (สำหรับ user ทั่วไป)
+
+ระบบไม่มี self-service signup — ต้องขอผ่าน admin
+
+**ขั้นตอน:**
+1. ส่งอีเมลจาก **Gmail ของตัวเอง** (เพื่อ verify identity ได้ง่าย) ไปที่ email ใน `AUTH_OWNER_EMAIL` พร้อมข้อมูล:
+   - Label / ชื่อที่อยากให้ใช้เรียก key (เช่น "ทีม marketing", "laptop-jane")
+   - Use case สั้นๆ — ใช้ทำอะไร (chatbot / coding assistant / batch script ฯลฯ)
+   - ปริมาณคาดการ์ณ (ถ้ามี) — กี่ request/วัน
+2. **Admin เข้า** `/admin/keys` (prompt master key) → กรอก label + notes (อ้างอีเมลผู้ขอ) → กด **+ สร้าง key**
+3. Admin **copy** `sml_live_...` **ตอบกลับทางอีเมล** (แสดงครั้งเดียว — หายไม่มีทางดูย้อนหลัง)
+4. User เอา key ไปใช้:
+   ```python
+   from openai import OpenAI
+   client = OpenAI(
+       base_url="https://<your-gateway-domain>/v1",
+       api_key="sml_live_xxxxxxxxxxxx",
+   )
+   ```
+
+**ถ้า key หาย / โดน leak:** user ส่งอีเมลแจ้ง → admin revoke ใน `/admin/keys` (ลบทันที) → ออก key ใหม่
+**ตั้งวันหมดอายุได้:** admin ใส่ expiry ตอนสร้าง (optional) — หมดอายุแล้ว middleware reject อัตโนมัติ
+
+> รายละเอียดเพิ่มเติม + tutorial ทุก framework (Python/Node/LangChain/Hermes/OpenClaw) ดูที่ `/guide`
+
 **Worker cycles ที่รันอัตโนมัติ:**
 
 | Loop | Interval | ทำอะไร |
