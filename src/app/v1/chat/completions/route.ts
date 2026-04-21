@@ -840,6 +840,12 @@ async function hedgeRace(
   body: Record<string, unknown>,
   isStream: boolean
 ): Promise<{ response: Response; winner: ModelRow; winnerIdx: number }> {
+  // Streaming hedge: race on first chunk received, not full response.
+  // Whichever provider delivers the first byte wins; loser is aborted.
+  // The winning stream is reconstructed (first chunk + remaining reader)
+  // into a fresh ReadableStream so the caller can pipe it to the client.
+  if (isStream) return streamHedgeRace(contenders, body);
+
   const controllers = contenders.map(() => new AbortController());
 
   const attempts = contenders.map((candidate, idx) =>
@@ -853,6 +859,59 @@ async function hedgeRace(
   const result = await Promise.any(attempts);
   controllers.forEach((c, i) => { if (i !== result.winnerIdx) c.abort(); });
   return result;
+}
+
+async function streamHedgeRace(
+  contenders: ModelRow[],
+  body: Record<string, unknown>,
+): Promise<{ response: Response; winner: ModelRow; winnerIdx: number }> {
+  const controllers = contenders.map(() => new AbortController());
+
+  // Race on first chunk: each candidate awaits its HTTP response, then awaits
+  // the first reader.read(). First to deliver real bytes wins.
+  const attempts = contenders.map(async (candidate, idx) => {
+    const res = await forwardToProvider(candidate.provider, candidate.model_id, body, true, controllers[idx].signal);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.body) throw new Error("no body");
+    const reader = res.body.getReader();
+    const first = await reader.read();
+    if (first.done) throw new Error("empty stream");
+    return { idx, firstChunk: first.value, reader, response: res, winner: candidate };
+  });
+
+  const winner = await Promise.any(attempts);
+  // Abort losers — let them clean up in the background
+  controllers.forEach((c, i) => { if (i !== winner.idx) { try { c.abort(); } catch { /* ignore */ } } });
+
+  // Stitch (firstChunk + remaining reader) into a new ReadableStream that the
+  // caller can hand to NextResponse — preserves SSE framing transparently.
+  const stitched = new ReadableStream({
+    async start(controller) {
+      try {
+        controller.enqueue(winner.firstChunk);
+        while (true) {
+          const { value, done } = await winner.reader.read();
+          if (done) break;
+          if (value) controller.enqueue(value);
+        }
+      } catch (err) {
+        controller.error(err);
+        return;
+      }
+      controller.close();
+    },
+    cancel() {
+      try { winner.reader.cancel(); } catch { /* ignore */ }
+    },
+  });
+
+  // Preserve provider response headers (Content-Type, X-RateLimit-*, etc.)
+  const proxiedRes = new Response(stitched, {
+    status: winner.response.status,
+    statusText: winner.response.statusText,
+    headers: winner.response.headers,
+  });
+  return { response: proxiedRes, winner: winner.winner, winnerIdx: winner.idx };
 }
 
 // Improvement F: probe Ollama /api/ps to see if model is loaded in memory
@@ -1466,8 +1525,9 @@ export async function POST(req: NextRequest) {
     // Sequential starts AFTER the last hedged position so we don't re-run the hedge slot
     hedgeStartIdx = lastHedgeIdx + 1;
     const hedgeCount = hedgeContenders.length;
+    // Hedge gate: now allows isStream=true — streamHedgeRace handles the
+    // race-on-first-byte path and stitches the winning ReadableStream.
     const canHedge =
-      !isStream &&
       !caps.hasTools &&
       estTokens <= 20_000 &&
       hedgeCount >= 2;
@@ -1482,7 +1542,29 @@ export async function POST(req: NextRequest) {
         console.log(`[HEDGE-WIN:${_reqId}] ${winner.provider}/${winner.model_id} vs [${losers.map(l => `${l.provider}/${l.model_id}`).join(", ")}] | ${latency}ms`);
         // Record winner as success, loser as neutral (cancelled)
         await recordProviderSuccessMem(winner.provider);
-        // Parse and return the hedge winner response
+
+        // Streaming hedge: stitched stream is already a fresh ReadableStream
+        // from streamHedgeRace — just decorate with our headers and return.
+        // Token usage / quality checks aren't possible without consuming the
+        // stream, so we record minimal stats (success + latency) and skip
+        // the post-gen Thai check / response cache for this path.
+        if (isStream) {
+          const streamHeaders = new Headers(hedgeResp.headers);
+          streamHeaders.set("X-SMLGateway-Provider", winner.provider);
+          streamHeaders.set("X-SMLGateway-Model", winner.model_id);
+          streamHeaders.set("X-SMLGateway-Hedge", "true");
+          streamHeaders.set("X-SMLGateway-Request-Id", _reqId);
+          if (softBackoff) streamHeaders.set("X-Resceo-Backoff", "true");
+          streamHeaders.set("Access-Control-Allow-Origin", "*");
+          await logGateway(modelField, winner.model_id, winner.provider, 200, latency, 0, 0, null, userMsg, null, _reqId, ip);
+          await recordRoutingResult(winner.id, winner.provider, promptCategory, true, latency);
+          recordOutcome(winner.provider, winner.model_id, true, latency);
+          recordBattleEvent(outcomeFromLatency(latency, true)).catch(() => {});
+          console.log(`[RES:${_reqId}] 200 | ${winner.provider}/${winner.model_id} | ${latency}ms | hedge-stream`);
+          return new Response(hedgeResp.body, { status: 200, headers: streamHeaders });
+        }
+
+        // Parse and return the hedge winner response (non-stream)
         try {
           const cloned = hedgeResp.clone();
           const json = await cloned.json() as { choices?: Array<{ message?: { content?: string; reasoning?: string; reasoning_content?: string; tool_calls?: unknown[] } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
@@ -1582,57 +1664,58 @@ export async function POST(req: NextRequest) {
       const candidate = spreadCandidates[i];
       const { provider, model_id: actualModelId, id: dbModelId } = candidate;
       if (blockedProviders.has(provider)) { skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:blocked`); continue; }
-      if (await isProviderCooledDownMem(provider)) { skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:provider-cooldown`); continue; }
-      if (await isCircuitOpen(provider)) { skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:circuit-open`); console.log(`[CIRCUIT-SKIP] ${provider} circuit open`); continue; }
 
-      // Improvement F: skip cold Ollama when cloud alternatives exist
-      if (provider === "ollama") {
-        const hasCloudAlternative = spreadCandidates.slice(i + 1).some(c => c.provider !== "ollama");
-        if (hasCloudAlternative) {
-          const loaded = await isOllamaModelLoaded(actualModelId);
-          if (!loaded) {
-            skippedCandidates.push(candidate);
-            skipReasons.push(`${provider}/${actualModelId}:cold-ollama`);
-            console.log(`[OLLAMA-SKIP] ${actualModelId} not loaded in memory — skipping (cloud alternatives available)`);
-            continue;
-          }
-        }
+      // ── Run independent skip-checks in parallel ─────────────────────
+      // Each check is a Redis/DB lookup; running them serially burned
+      // 7×~5-15ms = up to 100ms per candidate. Promise.all collapses to
+      // ~max(15ms). First check that returns "skip" wins (deterministic
+      // priority list mirrors the original serial order).
+      const estProjected = estTokens + 2000;
+      const wantOllamaCheck = provider === "ollama";
+      const hasCloudAlt = wantOllamaCheck && spreadCandidates.slice(i + 1).some(c => c.provider !== "ollama");
+      const hasCloudLeft = wantOllamaCheck && caps.hasTools && spreadCandidates.slice(i).some(c => c.provider !== "ollama" && !blockedProviders.has(c.provider));
+      const wantUnhealthyCheck = caps.hasTools || caps.hasImages;
+
+      const [
+        cooledDown,
+        circuitOpen,
+        ollamaLoaded,
+        unhealthyCheck,
+        tpmHeadroom,
+        fitCheck,
+        capCheck,
+      ] = await Promise.all([
+        isProviderCooledDownMem(provider),
+        isCircuitOpen(provider),
+        wantOllamaCheck && hasCloudAlt ? isOllamaModelLoaded(actualModelId) : Promise.resolve(true),
+        wantUnhealthyCheck ? isModelUnhealthyForCategory(dbModelId, learningCategory) : Promise.resolve({ unhealthy: false, reason: "" }),
+        hasTpmHeadroom(provider, actualModelId, estProjected),
+        canFitRequest(provider, actualModelId, estProjected),
+        canHandleTokens(dbModelId, estTokens),
+      ]);
+
+      if (cooledDown) { skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:provider-cooldown`); continue; }
+      if (circuitOpen) { skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:circuit-open`); console.log(`[CIRCUIT-SKIP] ${provider} circuit open`); continue; }
+      if (wantOllamaCheck && hasCloudAlt && !ollamaLoaded) {
+        skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:cold-ollama`);
+        console.log(`[OLLAMA-SKIP] ${actualModelId} not loaded in memory — skipping (cloud alternatives available)`);
+        continue;
       }
-
-      // P3: Skip Ollama for tool requests when cloud alternatives exist
-      if (provider === "ollama" && caps.hasTools) {
-        const hasCloudLeft = spreadCandidates.slice(i).some(c => c.provider !== "ollama" && !blockedProviders.has(c.provider));
-        if (hasCloudLeft) {
-          skippedCandidates.push(candidate);
-          skipReasons.push(`${provider}/${actualModelId}:ollama-no-tools`);
-          console.log(`[OLLAMA-SKIP-TOOLS] ${actualModelId} — tools requested, cloud alternatives exist`);
-          continue;
-        }
+      if (hasCloudLeft) {
+        skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:ollama-no-tools`);
+        console.log(`[OLLAMA-SKIP-TOOLS] ${actualModelId} — tools requested, cloud alternatives exist`);
+        continue;
       }
-
-      // P2: Skip model if it has a learned loss_streak in this request's category
-      // (self-learned from production signals — no hardcoded list)
-      if (caps.hasTools || caps.hasImages) {
-        const unhealthyCheck = await isModelUnhealthyForCategory(dbModelId, learningCategory);
-        if (unhealthyCheck.unhealthy) {
-          skippedCandidates.push(candidate);
-          skipReasons.push(`${provider}/${actualModelId}:unhealthy-${learningCategory}`);
-          console.log(`[UNHEALTHY-SKIP:${_reqId}] ${provider}/${actualModelId} ${learningCategory} — ${unhealthyCheck.reason}`);
-          continue;
-        }
+      if (wantUnhealthyCheck && unhealthyCheck.unhealthy) {
+        skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:unhealthy-${learningCategory}`);
+        console.log(`[UNHEALTHY-SKIP:${_reqId}] ${provider}/${actualModelId} ${learningCategory} — ${unhealthyCheck.reason}`);
+        continue;
       }
-
-      // P4: Skip if provider TPM budget is exhausted
-      const estProjected = estTokens + 2000; // estimated response budget
-      if (!(await hasTpmHeadroom(provider, actualModelId, estProjected))) {
-        skippedCandidates.push(candidate);
-        skipReasons.push(`${provider}/${actualModelId}:tpm-exhausted`);
+      if (!tpmHeadroom) {
+        skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:tpm-exhausted`);
         console.log(`[TPM-EXHAUST-SKIP:${_reqId}] ${provider}/${actualModelId} — est ${estProjected} tok`);
         continue;
       }
-
-      // P4b: Pre-check จาก provider_limits (learned from 429 + headers)
-      const fitCheck = await canFitRequest(provider, actualModelId, estProjected);
       if (!fitCheck.ok) {
         skippedCandidates.push(candidate);
         const tag = fitCheck.reason?.startsWith("TPM hard") || fitCheck.reason?.startsWith("TPD hard") ? "limit-hard" : "limit-exhausted";
@@ -1640,12 +1723,8 @@ export async function POST(req: NextRequest) {
         console.log(`[LIMIT-SKIP:${_reqId}] ${provider}/${actualModelId} — ${fitCheck.reason}`);
         continue;
       }
-
-      // P4c: Pre-check จาก learned capacity (p90/max/min_failed per model)
-      const capCheck = await canHandleTokens(dbModelId, estTokens);
       if (!capCheck.ok) {
-        skippedCandidates.push(candidate);
-        skipReasons.push(`${provider}/${actualModelId}:capacity`);
+        skippedCandidates.push(candidate); skipReasons.push(`${provider}/${actualModelId}:capacity`);
         console.log(`[CAPACITY-SKIP:${_reqId}] ${provider}/${actualModelId} — ${capCheck.reason}`);
         continue;
       }
