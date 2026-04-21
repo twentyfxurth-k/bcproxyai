@@ -54,7 +54,7 @@ NEXTAUTH_URL=https://your-domain.com
 
 ดูรายละเอียดทุกตัวแปรใน [.env.example](.env.example).
 
-**Stateless** — gateway ไม่เก็บ conversation history / session memory. Client (OpenClaw, Aider, IDE plugin, ฯลฯ) เป็นคนจัดการ history เอง แล้วส่ง `messages[]` array มาทุก request ตามมาตรฐาน OpenAI API. ระบบมีแค่ `semantic_cache` (cache response ตาม embedding similarity) + routing memory (`live_score`, `fail_streak`, category winners) ซึ่งเป็น aggregate stat ไม่ผูกกับ user.
+**Stateless** — gateway ไม่เก็บ conversation history / session memory. Client (OpenClaw, Aider, IDE plugin, ฯลฯ) เป็นคนจัดการ history เอง แล้วส่ง `messages[]` array มาทุก request ตามมาตรฐาน OpenAI API. ระบบมีแค่ response cache (hash ตาม body+model — cache HIT กลับใน <200ms) + routing memory (`live_score`, `fail_streak`, category winners) ซึ่งเป็น aggregate stat ไม่ผูกกับ user.
 
 **DB-driven config** — Provider list และ API keys อยู่ใน database ทั้งหมด (`provider_catalog` + `api_keys` table). `.env.local` ใช้แค่ runtime config (Ollama URL, Cloudflare account ID) — **ไม่อ่าน API key จาก env**. ตั้งค่าทุกอย่างผ่าน Setup modal ในหน้า dashboard.
 
@@ -70,9 +70,9 @@ NEXTAUTH_URL=https://your-domain.com
 | 🔐 3 auth methods | Local (open) / Password cookie / Google OAuth — เลือกได้ตาม env, ใช้คู่ได้. Per-client key ออกที่ `/admin/keys` |
 | 🔎 Auto-verify | probe homepage + `/v1/models` ของทุก provider ทุก 3 นาที + sync URL ใหม่จาก cheahjs/LiteLLM registry ทุก 6 ชม. |
 | 🌐 Auto-Discovery | สแกน OpenRouter/HuggingFace/URL pattern หา provider ใหม่ทุก 15 นาที (กรอง paid ทิ้ง) |
-| ⚡ Fast | hedge top-3 (first-byte race สำหรับ stream), warmup, connection pre-warm, semantic cache, model-list 30s cache → p50 ~120ms (cached), streaming TTFB ~450ms |
+| ⚡ Fast | hedge top-3 (first-byte race สำหรับ stream), warmup, connection pre-warm, response cache, model-list 30s cache → p50 ~120ms (cached), streaming TTFB ~450ms |
 | 🎯 Smart routing | per-category teacher (thai/code/tools/vision/...) |
-| 🔄 Auto-fallback | provider ล่ม → สลับทันที, circuit breaker + cooldown |
+| 🔄 Auto-fallback | provider ล่ม → สลับทันที, **per-(provider,model) circuit breaker** + exponential cooldown |
 | 🔌 Drop-in | เปลี่ยนแค่ `baseURL` ของ OpenAI SDK → ใช้ได้เลย |
 | 📐 Structured JSON | `/v1/structured` — schema validation + auto-retry |
 | ⚖️ A/B test | `/v1/compare` ยิง prompt ไป N model พร้อมกัน |
@@ -232,22 +232,28 @@ Trigger manual: `curl -X POST http://localhost:3334/api/worker`
 
 สเกล gateway หลายตัว: `docker compose up -d --scale sml-gateway=N` (Caddy load balance ให้)
 
-### DB Schema (26 tables, highlights)
+### DB Schema (29 tables, highlights)
 
 | Table | หน้าที่ |
 |---|---|
-| `models` | รายการโมเดล + flags (vision, tools, thai, ...) + live_score |
+| `models` | รายการโมเดล + flags (vision, tools, thai, reasoning, ...) + live_score |
 | `teachers` | ครูใหญ่ + ครูหัวหน้าต่อ category + ครูคุมสอบ (rebuild ทุก cycle) |
 | `model_category_scores` | คะแนนรายโมเดลต่อ 12 หมวด (code, thai, tools, vision, ...) |
 | `exam_attempts` / `exam_answers` | ผลสอบ + คอลัมน์ `exam_level` (primary/middle/high/university) |
 | `worker_state` | key-value config (เช่น `exam_level` ที่ใช้สอบรอบถัดไป) |
-| `provider_catalog` | registry ของ provider ที่ระบบรู้จัก (seed + auto-discovered จาก OpenRouter/HF/pattern) |
-| `gateway_logs` | log ทุก request (model, provider, latency, status) |
+| `provider_catalog` | registry ของ provider + `auth_scheme` (bearer/apikey-header/none) + verify metadata |
+| `provider_settings` / `api_keys` | API key ต่อ provider (encrypted) + meta |
+| `gateway_api_keys` | per-client `sml_live_*` keys ที่ admin ออก (SHA-256 hash) |
+| `gateway_logs` | log ทุก request (model, provider, latency, status, answer) |
 | `health_logs` | ping ทุก cycle + cooldown_until |
-| `model_fail_streak` | fail streak + cooldown exponential |
+| `model_fail_streak` | fail streak + exponential cooldown |
 | `provider_limits` | TPM/TPD/RPM ที่ parse จาก response header |
-| `semantic_cache` | pgvector cosine similarity cache |
+| `token_usage` | tracking token usage ต่อ (provider, model) ใน rolling window |
+| `worker_logs` | log ของ worker ทุก step (discovery/verify/scan/exam/warmup/cleanup) |
+| `events` | school-bell notifications + provider errors |
+| `complaints` / `complaint_exams` | User complaint loop (model ตอบแย่ → auto re-exam) |
 | `routing_stats` | p50/p99 latency ต่อ provider |
+| `prompts` | prompt library สำหรับ `POST /v1/prompts` |
 
 ---
 

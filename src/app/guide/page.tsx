@@ -752,7 +752,8 @@ GET    /api/admin/circuits             → { open[], halfOpen[], warnings[], sum
 DELETE /api/admin/circuits?provider=X&modelId=Y   → reset 1 คู่
 DELETE /api/admin/circuits             → reset ทั้งหมด (nuclear)`}</Code>
           <p className="text-xs text-gray-400 leading-relaxed">
-            <strong>warnings</strong> = (provider, model) ที่มี fail streak ≥ 3 ใน 30 วินาที แต่ยังไม่ trip — early warning ก่อน circuit open
+            <strong>warnings</strong> = (provider, model) ที่มี fail streak ≥ 3 ใน 30 วินาที แต่ยังไม่ trip — early warning ก่อน circuit open.
+            Dashboard จะขึ้นการ์ดแดง <strong>🚨 Circuits open: X</strong> ให้ admin อัตโนมัติ ถ้ามี trip &gt; 0 (ซ่อนตอน healthy)
           </p>
         </Section>
 
