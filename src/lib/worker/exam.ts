@@ -4,7 +4,7 @@
  * หลักการ:
  * 1. ข้อสอบเน้น "ใช้งานจริง" — instruction following, JSON, tool calls, extraction
  * 2. ตรวจแบบ rule-based (regex, parse) — ไม่พึ่ง judge model (เร็ว เชื่อถือได้)
- * 3. ผ่าน ≥ 85% ถึงจะได้ทำงาน (25 ข้อ — 22 text + 3 vision)
+ * 3. ผ่านเกณฑ์ตามระดับ (middle 50% / high 60% / university 70%) ถึงจะได้ทำงาน
  * 4. เก็บประวัติทุก attempt + คำตอบรายข้อ
  * 5. Fail → cooldown 24h → retry automatic
  */
@@ -31,16 +31,19 @@ export type ExamLevel = "middle" | "high" | "university";
 export const EXAM_LEVELS: ExamLevel[] = ["middle", "high", "university"];
 
 // เกณฑ์ผ่านแยกตามระดับ (ระดับยากผ่านยากขึ้น)
+// Lowered from 75/80/85 → 50/60/70: rule-based grading is strict (exact match,
+// regex); many 429/timeout attempts also land at 0% and drag aggregate scores
+// down. 50% middle = 5/9 correct = "usable" signal without over-filtering.
 const PASS_THRESHOLD_BY_LEVEL: Record<ExamLevel, number> = {
-  middle: 75,
-  high: 80,
-  university: 85,
+  middle: 50,
+  high: 60,
+  university: 70,
 };
 
 export const EXAM_LEVEL_META: Record<ExamLevel, { label: string; emoji: string; threshold: number; description: string }> = {
-  middle:     { label: "มัธยมต้น", emoji: "🟡", threshold: 75, description: "ข้อปานกลาง — JSON extraction, ความปลอดภัยพื้นฐาน, distraction, ภาษาไทยพื้นฐาน" },
-  high:       { label: "มัธยมปลาย",emoji: "🟠", threshold: 80, description: "ข้อยากปานกลาง — logic, long context, extraction ซับซ้อน" },
-  university: { label: "มหาลัย",   emoji: "🔴", threshold: 85, description: "ข้อยากมาก — tool call, vision, code, multi-step math" },
+  middle:     { label: "มัธยมต้น", emoji: "🟡", threshold: 50, description: "ข้อปานกลาง — JSON extraction, ความปลอดภัยพื้นฐาน, distraction, ภาษาไทยพื้นฐาน" },
+  high:       { label: "มัธยมปลาย",emoji: "🟠", threshold: 60, description: "ข้อยากปานกลาง — logic, long context, extraction ซับซ้อน" },
+  university: { label: "มหาลัย",   emoji: "🔴", threshold: 70, description: "ข้อยากมาก — tool call, vision, code, multi-step math" },
 };
 
 // ระดับที่ครอบคลุม (cumulative): มหาลัยสอบทุกข้อ, มัธยมต้นสอบเฉพาะข้อ middle
@@ -51,7 +54,7 @@ const LEVEL_INCLUDES: Record<ExamLevel, ExamLevel[]> = {
 };
 
 export function getPassThreshold(level: ExamLevel): number {
-  return PASS_THRESHOLD_BY_LEVEL[level] ?? 85;
+  return PASS_THRESHOLD_BY_LEVEL[level] ?? 50;
 }
 
 // ─── Question Definition ──────────────────────────────────────────────────────
