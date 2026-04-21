@@ -12,6 +12,7 @@ import { detectPromptCategory, recordRoutingResult, getBestModelsForCategory, ge
 import { getRedis } from "@/lib/redis";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { getCachedResponse, setCachedResponse } from "@/lib/response-cache";
+import { bumpPerf } from "@/lib/perf-counters";
 import { recordBattleEvent, outcomeFromLatency } from "@/lib/battle-score";
 import { hasTpmHeadroom, recordTokenConsumption } from "@/lib/tpm-tracker";
 import { recordOutcome, getProviderScore, getModelScore, isRecentlyDead } from "@/lib/live-score";
@@ -128,6 +129,30 @@ async function setProviderCooldownMem(provider: string, ms: number, reason: stri
     // Fallback: in-memory
     _memCooldowns.set(provider, { until: Date.now() + ms, reason });
   }
+}
+
+// Sustained 429 detector: if a provider returns ≥ RL_THRESHOLD 429s within a
+// 30s window, quota is clearly exhausted for the whole provider (not just one
+// model). Cool the whole provider down so routing stops wasting retries on it.
+//
+// Verified in stress test: openrouter saw 29/29 429s — keeping it in rotation
+// burnt retries. Auto-demoting it for 5 min lets the other 5 providers carry.
+const RL_WINDOW_SEC = 30;
+const RL_THRESHOLD = 5;          // 429s within window before we demote
+const RL_COOLDOWN_MS = 5 * 60_000;
+
+async function recordProviderRateLimitHit(provider: string): Promise<void> {
+  try {
+    const redis = getRedis();
+    const key = `rl:hits:${provider}`;
+    const results = await redis.pipeline().incr(key).expire(key, RL_WINDOW_SEC).exec();
+    const count = Number(results?.[0]?.[1] ?? 0);
+    if (count >= RL_THRESHOLD) {
+      await setProviderCooldownMem(provider, RL_COOLDOWN_MS, `sustained 429s (${count} in ${RL_WINDOW_SEC}s) — provider quota likely exhausted`);
+      bumpPerf("demote:rate-limit");
+      await redis.del(key); // reset after demote so we re-learn if cooldown ends
+    }
+  } catch { /* non-critical */ }
 }
 
 async function recordProviderFailureMem(provider: string): Promise<void> {
@@ -1159,6 +1184,7 @@ export async function POST(req: NextRequest) {
     // Improvement C: response cache check (non-stream, low-temperature, no tools)
     const cachedHit = await getCachedResponse(body);
     if (cachedHit) {
+      bumpPerf("cache:hit");
       console.log(`[CACHE-HIT] ${cachedHit.provider}/${cachedHit.model}`);
       const cacheHeaders = new Headers();
       cacheHeaders.set("Content-Type", "application/json");
@@ -1599,6 +1625,7 @@ export async function POST(req: NextRequest) {
       if (stickyIdx > 0) {
         const [pinned] = spreadCandidates.splice(stickyIdx, 1);
         spreadCandidates.unshift(pinned);
+        bumpPerf("sticky:hit");
         if (process.env.LOG_LEVEL === "debug") console.log(`[STICKY:${_reqId}] pinned ${stickyHit.provider}/${stickyHit.modelId} (from idx ${stickyIdx})`);
       }
     }
@@ -1664,6 +1691,8 @@ export async function POST(req: NextRequest) {
         // Record winner as success, loser as neutral (cancelled)
         await recordProviderSuccessMem(winner.provider, winner.model_id);
         if (ip) setSticky(ip, promptCategory, winner.provider, winner.model_id);
+        bumpPerf("hedge:win");
+        bumpPerf("cache:miss");
 
         // Streaming hedge: stitched stream is already a fresh ReadableStream
         // from streamHedgeRace — just decorate with our headers and return.
@@ -1767,6 +1796,7 @@ export async function POST(req: NextRequest) {
       } catch {
         const latency = Date.now() - startTime;
         console.log(`[HEDGE-LOSS:${_reqId}] all top-${hedgeCount} failed | ${latency}ms — continuing sequential`);
+        bumpPerf("hedge:loss");
         hedgeStartIdx = 0;
         await Promise.all(
           hedgeContenders.flatMap(c => [recordProviderFailureMem(c.provider), recordCircuitFailure(c.provider, c.model_id)])
@@ -1919,6 +1949,7 @@ export async function POST(req: NextRequest) {
             const timer = setTimeout(() => {
               if (settled) return;
               backupFired = true;
+              bumpPerf("spec:fire");
               console.log(`[SPEC-FIRE:${_reqId}] primary ${provider}/${actualModelId} > ${SPEC_THRESHOLD_MS}ms → speculate with ${peekCandidate!.provider}/${peekCandidate!.model_id}`);
               forwardToProvider(peekCandidate!.provider, peekCandidate!.model_id, body, isStream, backupAc.signal)
                 .then(r => {
@@ -1939,6 +1970,7 @@ export async function POST(req: NextRequest) {
           response = race.r;
           if (race.swap && peekCandidate) {
             // Speculative won — swap accounting vars to the winner
+            bumpPerf("spec:win");
             console.log(`[SPEC-WIN:${_reqId}] backup ${peekCandidate.provider}/${peekCandidate.model_id} beat ${provider}/${actualModelId}`);
             provider = peekCandidate.provider;
             actualModelId = peekCandidate.model_id;
@@ -1959,11 +1991,15 @@ export async function POST(req: NextRequest) {
           if (headerLimit) {
             recordLimit(provider, actualModelId, headerLimit).catch(() => {});
           }
-          const SLOW_THRESHOLD_MS = 10_000;
-          const SLOW_COOLDOWN_MINUTES = 10;
-          if (latency > SLOW_THRESHOLD_MS && provider !== "ollama") {
-            await logCooldown(dbModelId, `Slow response: ${(latency / 1000).toFixed(1)}s > ${SLOW_THRESHOLD_MS / 1000}s threshold`, 0, SLOW_COOLDOWN_MINUTES);
-            await emitEvent("provider_error", `${provider}/${actualModelId} ช้ามาก (${(latency / 1000).toFixed(1)}s)`, `ตอบช้าเกิน ${SLOW_THRESHOLD_MS / 1000}s → cooldown ${SLOW_COOLDOWN_MINUTES} นาที`, provider, actualModelId, "warn");
+          // Use adaptive threshold (scales with prompt size) + shorter 5min cooldown.
+          // Stress test showed nvidia/mixtral-8x22b sitting at 2.4s p50 / 8.5s p95 —
+          // old fixed 10s threshold never fired so it stayed in pool. Adaptive
+          // threshold of 5-15s based on input size catches slow models faster.
+          const slowThrFirst = slowThresholdMs(estTokens);
+          const SLOW_COOLDOWN_MINUTES = 5;
+          if (latency > slowThrFirst && provider !== "ollama") {
+            await logCooldown(dbModelId, `Slow response: ${(latency / 1000).toFixed(1)}s > ${slowThrFirst}ms threshold`, 0, SLOW_COOLDOWN_MINUTES);
+            await emitEvent("provider_error", `${provider}/${actualModelId} ช้า (${(latency / 1000).toFixed(1)}s)`, `ตอบช้าเกิน ${slowThrFirst}ms → cooldown ${SLOW_COOLDOWN_MINUTES} นาที`, provider, actualModelId, "warn");
           } else {
             try {
               const sql = getSqlClient();
@@ -2118,12 +2154,14 @@ export async function POST(req: NextRequest) {
         const st = response.status;
         console.log(`[RETRY:${_reqId}] ${tried}/${MAX_RETRIES} | ${provider}/${actualModelId} → HTTP ${st} | ${errText.slice(0, 200)}`);
 
-        // Learn limit จาก 429 error message
+        // Learn limit จาก 429 error message + track sustained rate for auto-demote
         if (st === 429) {
           const parsed = parseLimitError(errText);
           if (parsed) {
             recordLimit(provider, actualModelId, parsed).catch(() => {});
           }
+          // Count 429s per provider in 30s rolling window; threshold trip = demote
+          recordProviderRateLimitHit(provider).catch(() => {});
         }
         // Learn limit จาก response header ด้วย (บาง provider ส่งมาใน fail response)
         const failHeaderLimit = parseLimitHeaders(response.headers);

@@ -49,6 +49,7 @@ import { SchoolBellPanel } from "../components/SchoolBellPanel";
 import { ProviderLimitsPanel } from "../components/ProviderLimitsPanel";
 import { SemanticCachePanel } from "../components/SemanticCachePanel";
 import { WarmupPanel } from "../components/WarmupPanel";
+import { PerfInsightsPanel } from "../components/PerfInsightsPanel";
 import { TeachersPanel } from "../components/TeachersPanel";
 import { CodegenPanel } from "../components/CodegenPanel";
 import { DevSuggestionsPanel } from "../components/DevSuggestionsPanel";
@@ -300,6 +301,7 @@ export default function Dashboard() {
           {/* Row 2: Nav links — wrappable */}
           <div className="flex flex-wrap gap-1 pb-2">
             {[
+              { id: "perf",          icon: "⚡",    label: "ประสิทธิภาพ" },
               { id: "gateway-logs",  icon: "\u{1F4DD}", label: "สมุดจดงาน" },
               { id: "codegen",       icon: "\u{1F4BE}", label: "โค้ดระบบ" },
               { id: "dev-suggestions", icon: "\u{1F4A1}", label: "คำแนะนำ Dev" },
@@ -420,6 +422,11 @@ export default function Dashboard() {
             </div>
           </section>
         )}
+
+        {/* ── Performance insights (1h rolling) ───────────────────────── */}
+        <section id="perf" className="animate-fade-in-up">
+          <PerfInsightsPanel />
+        </section>
 
         {/* ── Live Mascot Theater (data-driven from gateway logs) ───────── */}
         <MascotScene />
