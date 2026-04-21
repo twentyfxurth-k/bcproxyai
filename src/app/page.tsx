@@ -114,6 +114,12 @@ export default function Dashboard() {
     status: "active" | "no_key" | "no_models" | "error";
   }
   const [providerStatuses, setProviderStatuses] = useState<ProviderStatus[]>([]);
+  const [circuitsSummary, setCircuitsSummary] = useState<{
+    totalOpen: number;
+    totalHalfOpen: number;
+    totalWarnings: number;
+    open: Array<{ provider: string; modelId: string; ttlSec: number; fails: number }>;
+  } | null>(null);
 
   // Scroll to top on mount
   useEffect(() => {
@@ -128,13 +134,16 @@ export default function Dashboard() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, m, l, cs, an, ps] = await Promise.all([
+      const [s, m, l, cs, an, ps, cb] = await Promise.all([
         fetch("/api/status").then((r) => r.json()),
         fetch("/api/models").then((r) => r.json()),
         fetch("/api/leaderboard").then((r) => r.json()),
         fetch("/api/cost-savings").then((r) => r.json()).catch(() => null),
         fetch("/api/analytics").then((r) => r.json()).catch(() => null),
         fetch("/api/providers").then((r) => r.json()).catch(() => []),
+        // Admin-only — 401 in non-owner sessions; silently ignore so widget
+        // just hides for non-admins (auth chain: master/cookie/Google).
+        fetch("/api/admin/circuits").then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ]);
       setStatusData(s);
       setModels(Array.isArray(m) ? m : []);
@@ -142,6 +151,16 @@ export default function Dashboard() {
       if (cs) setCostSavings(cs);
       if (an) setAnalyticsData(an);
       if (Array.isArray(ps)) setProviderStatuses(ps);
+      if (cb && cb.summary) {
+        setCircuitsSummary({
+          totalOpen: cb.summary.totalOpen ?? 0,
+          totalHalfOpen: cb.summary.totalHalfOpen ?? 0,
+          totalWarnings: cb.summary.totalWarnings ?? 0,
+          open: Array.isArray(cb.open) ? cb.open : [],
+        });
+      } else {
+        setCircuitsSummary(null);
+      }
       setLastRefresh(new Date());
     } catch (err) {
       console.error("fetch error", err);
@@ -349,6 +368,53 @@ export default function Dashboard() {
                   className="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold text-sm shadow-lg shadow-amber-500/30 transition-all whitespace-nowrap inline-block"
                 >
                   ⚙️ ใส่ API key ตอนนี้
+                </a>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* ── Circuits-open warning (admin only, hidden when healthy) ─── */}
+        {circuitsSummary && (circuitsSummary.totalOpen > 0 || circuitsSummary.totalHalfOpen > 0) && (
+          <section className="animate-fade-in-up">
+            <div className="rounded-xl border-2 border-red-500/40 bg-gradient-to-r from-red-500/10 to-orange-500/10 p-4 shadow-lg shadow-red-500/10">
+              <div className="flex items-start gap-3 flex-wrap">
+                <span className="text-3xl">🚨</span>
+                <div className="flex-1 min-w-[260px]">
+                  <div className="font-bold text-red-200 text-base mb-1">
+                    Circuits open: {circuitsSummary.totalOpen}
+                    {circuitsSummary.totalHalfOpen > 0 && (
+                      <span className="ml-2 text-amber-300 text-sm font-normal">
+                        + {circuitsSummary.totalHalfOpen} กำลัง probe (half-open)
+                      </span>
+                    )}
+                    {circuitsSummary.totalWarnings > 0 && (
+                      <span className="ml-2 text-yellow-300 text-sm font-normal">
+                        · {circuitsSummary.totalWarnings} ใกล้ trip
+                      </span>
+                    )}
+                  </div>
+                  {circuitsSummary.open.length > 0 && (
+                    <div className="text-xs text-red-100/80 font-mono space-y-0.5">
+                      {circuitsSummary.open.slice(0, 5).map((e) => (
+                        <div key={`${e.provider}/${e.modelId}`}>
+                          · {e.provider}/{e.modelId} — {e.fails} fails · reopen ใน {e.ttlSec}s
+                        </div>
+                      ))}
+                      {circuitsSummary.open.length > 5 && (
+                        <div className="text-red-300/60">+ อีก {circuitsSummary.open.length - 5} ตัว</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <a
+                  href="/api/admin/circuits"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-100 border border-red-500/40 transition-colors text-xs whitespace-nowrap"
+                  title="ดู JSON เต็ม"
+                >
+                  ดูทั้งหมด →
                 </a>
               </div>
             </div>
