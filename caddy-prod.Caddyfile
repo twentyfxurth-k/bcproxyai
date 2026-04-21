@@ -17,9 +17,12 @@
 :80 {
 	reverse_proxy sml-gateway:3000 {
 		lb_policy round_robin
+		lb_try_duration 10s
+		lb_try_interval 250ms
 		health_uri /api/health
 		health_interval 10s
-		health_timeout 5s
+		health_timeout 15s
+		health_fails 3
 		health_status 200
 		# Forward the real client IP derived from trusted headers
 		header_up X-Forwarded-For {client_ip}
