@@ -1434,7 +1434,10 @@ export async function POST(req: NextRequest) {
 
     // P1: Pre-flight size check — skip models whose context_length is too small for this request
     const estTokens = estimateTokens(body);
-    const requiredContext = Math.ceil(estTokens * 1.4); // 30% headroom for response + safety margin
+    // Safety margin bumped 1.4x → 1.8x: estimateTokens uses chars/3 which under-counts
+    // Thai UTF-8 + JSON tool definitions (Hermes agent commonly sends both).
+    // Plus some providers (Groq) impose effective context < catalog value.
+    const requiredContext = Math.ceil(estTokens * 1.8);
     const sizeFiltered = finalCandidates.filter(c => {
       // context_length = 0 หรือ null → ไม่รู้ขนาด ถือว่าไม่ปลอดภัย ข้าม
       if (!c.context_length || c.context_length === 0) {
@@ -2169,6 +2172,42 @@ export async function POST(req: NextRequest) {
           recordLimit(provider, actualModelId, failHeaderLimit).catch(() => {});
         }
 
+        // ── Client-side 400 = invalid request shape → STOP retrying ──
+        // If the upstream says the request itself is malformed (bad message
+        // order, unknown role, invalid schema), trying another model is
+        // pointless — every other provider will reject the same body.
+        // Common offender: Hermes agent sends [system, tool, ...] which
+        // Mistral rejects because a tool role must follow an assistant turn.
+        const isClientShapeError = st === 400 && (
+          /invalid_request_message_order|role|unexpected|invalid_request_format|invalid_schema/i.test(errText) ||
+          errText.includes("Unexpected role") ||
+          errText.includes("message_order")
+        );
+        if (isClientShapeError) {
+          console.log(`[CLIENT-400:${_reqId}] ${provider}/${actualModelId} — request shape invalid, not retrying other models`);
+          lastError = `invalid request shape: ${errText.slice(0, 200)}`;
+          lastProvider = provider;
+          lastModelId = actualModelId;
+          // Log the attempt then break out so the final response surfaces the
+          // real reason to the client instead of our synthetic "all providers failed"
+          const latencyShape = Date.now() - startTime;
+          await recordRoutingResult(dbModelId, provider, promptCategory, false, latencyShape);
+          recordOutcome(provider, actualModelId, false, latencyShape);
+          // Surface the original 400 body as-is so clients can fix their request
+          await logGateway(modelField, actualModelId, provider, 400, latencyShape, 0, 0, errText.slice(0, 300), userMsg, null, _reqId, ip);
+          return new Response(errText, {
+            status: 400,
+            headers: {
+              "Content-Type": "application/json",
+              "X-SMLGateway-Provider": provider,
+              "X-SMLGateway-Model": actualModelId,
+              "X-SMLGateway-Request-Id": _reqId,
+              "X-SMLGateway-Reason": "client-shape-error",
+              "Access-Control-Allow-Origin": "*",
+            },
+          });
+        }
+
         // ทุก non-2xx → exponential cooldown → request ถัดไปจะไม่เลือกซ้ำ
         if (st === 400 || st === 402 || st === 429 || st === 413 || st === 422 || st === 410 || st === 404 || st >= 500 || st === 401 || st === 403) {
           // TPD (per-day) limit — groq/gemini ฯลฯ คืน 429 + "daily" หรือ TPD → cooldown 24 ชม.
@@ -2180,9 +2219,17 @@ export async function POST(req: NextRequest) {
             // ตรง context overflow จริงๆ → cooldown 30 นาที (request นี้ใหญ่จริง model นี้ไม่รับ)
             await logCooldown(dbModelId, `Context overflow: ${errText.slice(0, 150)}`, st, 30);
           } else if (st === 413 || st === 422) {
-            // 413/422 generic (เช่น Groq TPM overflow) → cooldown สั้น 2 นาที
-            // เพราะ model ยังใช้ได้ ถ้า request เล็กกว่า / TPM reset
-            await logCooldown(dbModelId, `HTTP ${st}: ${errText.slice(0, 150)}`, st, 2);
+            // 413 = payload too large — this model can't handle prompts this size.
+            // Cooldown 10min (was 2) since we keep bumping into the same wall from
+            // the same clients (e.g. Hermes agent). Also stash the real practical
+            // ceiling in Redis so routing filters more aggressively for N minutes.
+            await logCooldown(dbModelId, `HTTP ${st}: ${errText.slice(0, 150)}`, st, 10);
+            try {
+              const redis = getRedis();
+              const practicalCeiling = Math.floor(estTokens * 0.9); // below the size that just failed
+              await redis.set(`ctx-hint:${dbModelId}`, String(practicalCeiling), "EX", 600);
+            } catch { /* non-critical */ }
+            console.log(`[413:${_reqId}] ${provider}/${actualModelId} — estTokens=${estTokens} too big, cooldown 10min + ctx hint`);
           } else {
             // Exponential cooldown: 1m → 2 → 4 → 8 → 16 → 60 min
             const streakCooldownMs = await recordFailStreak(dbModelId);
