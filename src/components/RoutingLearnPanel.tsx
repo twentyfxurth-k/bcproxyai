@@ -70,7 +70,7 @@ export function RoutingLearnPanel() {
       {/* Summary */}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
         <div className="bg-gray-800/50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-indigo-400">{data.totalLearned}</div>
+          <div className="text-2xl font-black text-indigo-400">{data.totalLearned}</div>
           <div className="text-xs text-gray-400">ครั้งที่ครูจำได้</div>
         </div>
         <div className="bg-gray-800/50 rounded-lg p-3 text-center">

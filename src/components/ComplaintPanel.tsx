@@ -83,7 +83,7 @@ function ReportCardModal({
 
         <div className="space-y-3 text-sm">
           <div className="flex justify-between">
-            <span className="text-gray-400">Provider</span>
+            <span className="text-gray-400">ผู้ให้บริการ</span>
             <span className="text-white">{complaint.provider}</span>
           </div>
           <div className="flex justify-between">

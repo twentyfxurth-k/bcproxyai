@@ -102,8 +102,8 @@ export function SpeedRace({ models, loading }: SpeedRaceProps) {
   if (loading) {
     return (
       <section id="speed-race" className="animate-fade-in-up stagger-2">
-        <div className="glass rounded-2xl p-6">
-          <div className="shimmer rounded h-8 w-64 bg-gray-800/60 mb-6" />
+        <div className="glass rounded-xl p-4">
+          <div className="shimmer rounded h-8 w-64 bg-gray-800/60 mb-3" />
           <div className="space-y-4">
             {[1, 2, 3, 4].map((i) => (
               <div key={i} className="shimmer rounded-xl h-14 bg-gray-800/60" />
@@ -127,8 +127,8 @@ export function SpeedRace({ models, loading }: SpeedRaceProps) {
 
   return (
     <section id="speed-race" className="animate-fade-in-up stagger-2">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-2xl font-black text-white flex items-center gap-3">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-orange-500/20 text-orange-400">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -140,8 +140,8 @@ export function SpeedRace({ models, loading }: SpeedRaceProps) {
 
       {/* Podium - Top 3 */}
       {top3.length >= 2 && (
-        <div className="glass-bright rounded-2xl p-5 neon-border card-3d mb-6">
-          <div className="flex items-center justify-center gap-6 sm:gap-10 flex-wrap">
+        <div className="glass-bright rounded-xl p-3 neon-border card-3d mb-3">
+          <div className="flex items-center justify-center gap-3 sm:gap-10 flex-wrap">
             {top3.map((racer, i) => {
               const hex = PROVIDER_HEX[racer.provider] ?? "#6366f1";
               return (
@@ -177,7 +177,7 @@ export function SpeedRace({ models, loading }: SpeedRaceProps) {
       )}
 
       {/* Race Lanes */}
-      <div className="glass rounded-2xl p-5 space-y-3">
+      <div className="glass rounded-xl p-3 space-y-3">
         {racers.map((racer, i) => {
           const hex = PROVIDER_HEX[racer.provider] ?? "#6366f1";
           const c = PROVIDER_COLORS[racer.provider] ?? {

@@ -99,7 +99,7 @@ export function CostOptimizerPanel() {
           <div className="text-xs text-gray-400">ใช้ฟรี</div>
         </div>
         <div className="bg-gray-800/50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-indigo-400">{summary.totalRequests}</div>
+          <div className="text-2xl font-black text-indigo-400">{summary.totalRequests}</div>
           <div className="text-xs text-gray-400">requests ทั้งหมด</div>
         </div>
       </div>
@@ -124,7 +124,7 @@ export function CostOptimizerPanel() {
       <div className="grid grid-cols-[repeat(auto-fit,minmax(360px,1fr))] gap-4">
         {/* Provider Cost Breakdown */}
         <div className="glass rounded-xl p-4">
-          <h4 className="text-sm font-bold text-gray-300 mb-3">ต้นทุนแยกตาม Provider</h4>
+          <h4 className="text-sm font-black text-white mb-2" title="แยกต้นทุน token ตามผู้ให้บริการ (คิดเป็น USD ถึงแม้ฟรี gateway เก็บไว้เทียบค่า)">ต้นทุนแยกตามผู้ให้บริการ</h4>
           <div className="space-y-3">
             {providerCosts.map(p => {
               const colors = PROVIDER_COLORS[p.provider] ?? PROVIDER_COLORS.openrouter;
@@ -138,7 +138,7 @@ export function CostOptimizerPanel() {
                       {p.free && <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1 rounded">FREE</span>}
                     </div>
                     <div className="flex items-center gap-3 text-xs">
-                      <span className="text-gray-400">{fmtTokens(totalTokens)} tokens</span>
+                      <span className="text-gray-400">{fmtTokens(totalTokens)} token</span>
                       <span className="text-gray-300 font-bold">${p.cost.toFixed(4)}</span>
                     </div>
                   </div>
@@ -148,7 +148,7 @@ export function CostOptimizerPanel() {
                       style={{ width: `${pct}%`, background: PROVIDER_COLORS[p.provider]?.glow ?? "#6366f1" }}
                     />
                   </div>
-                  <div className="text-[10px] text-gray-600 mt-0.5">{p.requests} requests</div>
+                  <div className="text-[10px] text-gray-500 mt-0.5">{p.requests} คำขอ</div>
                 </div>
               );
             })}
@@ -157,7 +157,7 @@ export function CostOptimizerPanel() {
 
         {/* Top Models by Token Usage */}
         <div className="glass rounded-xl p-4">
-          <h4 className="text-sm font-bold text-gray-300 mb-3">Top Models (Token Usage)</h4>
+          <h4 className="text-sm font-black text-white mb-2" title="model ที่ใช้ token รวม (input + output) มากสุด 8 อันดับ">โมเดลที่ใช้ token มากสุด</h4>
           <div className="space-y-2">
             {modelUsage.slice(0, 8).map((m, i) => {
               const colors = PROVIDER_COLORS[m.provider] ?? PROVIDER_COLORS.openrouter;

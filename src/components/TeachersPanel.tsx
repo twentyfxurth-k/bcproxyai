@@ -166,7 +166,7 @@ export function TeachersPanel() {
 
   if (loading) {
     return (
-      <div className="glass rounded-2xl p-4 text-gray-500 text-sm">
+      <div className="glass rounded-xl p-3 text-gray-500 text-sm">
         กำลังโหลดข้อมูลคณะครู…
       </div>
     );
@@ -174,7 +174,7 @@ export function TeachersPanel() {
 
   if (!data) {
     return (
-      <div className="glass rounded-2xl p-4 text-gray-500 text-sm">
+      <div className="glass rounded-xl p-3 text-gray-500 text-sm">
         ไม่สามารถโหลดข้อมูลคณะครูได้
       </div>
     );
@@ -183,7 +183,7 @@ export function TeachersPanel() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="glass rounded-2xl p-4 border border-white/10">
+      <div className="glass rounded-xl p-3 border border-white/10">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xl font-bold text-gray-200 flex items-center gap-2">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 text-white text-base">
@@ -254,7 +254,7 @@ export function TeachersPanel() {
       </div>
 
       {/* Recent Gradings */}
-      <div className="glass rounded-2xl p-4 border border-white/10">
+      <div className="glass rounded-xl p-3 border border-white/10">
         <h3 className="text-base font-bold text-gray-200 flex items-center gap-2 mb-3">
           📜 ประวัติการตรวจ (Grading History)
           <span className="text-xs text-gray-500 font-normal">

@@ -135,7 +135,7 @@ function PostgresCard({ d }: { d: InfraData["postgres"] }) {
     <CardShell accent="indigo">
       <div className="flex items-center gap-2">
         <span className="text-xl">🐘</span>
-        <span className="font-bold text-white text-sm">Postgres</span>
+        <span className="font-bold text-white text-sm" title="ฐานข้อมูลหลัก — เก็บ model/teacher/exam/logs">ฐานข้อมูล (Postgres)</span>
         <StatusDot ok={d.ok} />
       </div>
       {d.ok ? (
@@ -182,7 +182,7 @@ function RedisCard({ d }: { d: InfraData["redis"] }) {
           <div className="text-xs text-gray-300">
             หน่วยความจำ: <span className="text-red-300 font-medium">{fmtBytes(d.memoryUsedBytes)}</span>
             <span className="text-gray-500 mx-1">·</span>
-            Keys: <span className="text-red-300 font-medium">{d.keysTotal.toLocaleString()}</span>
+            คีย์: <span className="text-red-300 font-medium">{d.keysTotal.toLocaleString()}</span>
           </div>
           <div className="space-y-1">
             <div className="flex justify-between text-xs text-gray-400">
@@ -270,16 +270,16 @@ function CooldownsCard({ d }: { d: InfraData["cooldowns"] }) {
       <div className="flex items-start justify-between gap-2 mb-1">
         <div className="flex items-center gap-2">
           <span className="text-lg">⚡</span>
-          <span className="font-bold text-white text-sm">Cooldowns</span>
+          <span className="font-bold text-white text-sm" title="model/provider ที่ถูกพักใช้งานชั่วคราว เพราะล้มเหลว/เกิน rate limit">รายชื่อที่ถูกพัก</span>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-gray-400">
           <span>
-            <span className="text-amber-300 font-bold">{d.providerCount}</span> providers
+            <span className="text-amber-300 font-bold">{d.providerCount}</span> ผู้ให้บริการ
           </span>
           <span className="text-gray-600">·</span>
           <span>
             <span className="text-amber-300 font-bold">{d.modelCount}</span>
-            <span className="text-gray-600">/{d.totalModels}</span> models
+            <span className="text-gray-600">/{d.totalModels}</span> model
             {d.totalModels > 0 && (
               <span className="text-gray-600"> ({modelPct}%)</span>
             )}
@@ -288,10 +288,10 @@ function CooldownsCard({ d }: { d: InfraData["cooldowns"] }) {
       </div>
       {d.providerCount === 0 ? (
         <div className="text-sm text-emerald-400 py-2">
-          ทุก provider พร้อมใช้งาน 🎉
+          ผู้ให้บริการพร้อมใช้งานครบ 🎉
           {d.modelCount > 0 && (
             <div className="text-[10px] text-gray-500 mt-0.5">
-              มี {d.modelCount} model ระดับ model-cooldown แต่ provider ทั้งหมดยังใช้ได้
+              มี {d.modelCount} model ถูกพักรายตัว แต่ผู้ให้บริการทั้งหมดยังใช้ได้
             </div>
           )}
         </div>
@@ -300,9 +300,9 @@ function CooldownsCard({ d }: { d: InfraData["cooldowns"] }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="text-gray-500 border-b border-white/10">
-                <th className="text-left py-1 font-medium">Provider</th>
+                <th className="text-left py-1 font-medium">ผู้ให้บริการ</th>
                 <th className="text-left py-1 font-medium">เหตุผล</th>
-                <th className="text-right py-1 font-medium">TTL</th>
+                <th className="text-right py-1 font-medium">เวลาเหลือ</th>
               </tr>
             </thead>
             <tbody>

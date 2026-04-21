@@ -85,16 +85,16 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
   if (!hasAnyData) {
     return (
       <section id="analytics" className="animate-fade-in-up stagger-3">
-        <div className="flex items-center gap-3 mb-6">
+        <div className="flex items-center gap-3 mb-3">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-400">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
           </span>
-          <h2 className="text-2xl font-bold text-white">Charts & Analytics</h2>
+          <h2 className="text-2xl font-black text-white">กราฟและสถิติ</h2>
         </div>
-        <div className="glass rounded-2xl p-12 text-center text-gray-500">
-          <div className="text-5xl mb-3">📊</div>
+        <div className="glass rounded-xl p-8 text-center text-gray-500">
+          <div className="text-5xl mb-2">📊</div>
           <p>ยังไม่มีข้อมูล — ใช้งาน Gateway แล้วกลับมาดูสถิติ</p>
         </div>
       </section>
@@ -103,23 +103,23 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
 
   return (
     <section id="analytics" className="animate-fade-in-up stagger-3">
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-3">
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-400">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
         </span>
-        <h2 className="text-2xl font-bold text-white">Charts & Analytics</h2>
-        <span className="text-xs text-gray-500">24 ชม. ล่าสุด</span>
+        <h2 className="text-2xl font-black text-white">กราฟและสถิติ</h2>
+        <span className="text-xs text-gray-400">24 ชม.ล่าสุด</span>
       </div>
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(360px,1fr))] gap-6">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-3">
 
         {/* ── 1. Provider Success Rate ─────────────────────────────────── */}
-        <div className="glass rounded-2xl p-5 card-3d">
-          <h3 className="text-sm font-bold text-gray-300 mb-4 flex items-center gap-2">
+        <div className="glass rounded-xl p-3 card-3d" title="สัดส่วนคำขอที่สำเร็จต่อ provider (ใน 24 ชม.ล่าสุด)">
+          <h3 className="text-sm font-black text-white mb-2 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-indigo-400" />
-            Provider Success Rate
+            อัตราสำเร็จต่อผู้ให้บริการ
           </h3>
           {providerStats.length === 0 ? (
             <p className="text-xs text-gray-600 text-center py-4">ไม่มีข้อมูล</p>
@@ -132,7 +132,7 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
                         <ProviderBadge provider={p.provider} />
-                        <span className="text-xs text-gray-500">{p.total} requests</span>
+                        <span className="text-xs text-gray-400">{p.total} คำขอ</span>
                       </div>
                       <span className="text-xs font-bold" style={{ color: hex }}>
                         {p.successRate}%
@@ -148,8 +148,8 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
                         }}
                       />
                     </div>
-                    <div className="text-[10px] text-gray-600 mt-0.5">
-                      avg {fmtMs(p.avgLatencyMs)}
+                    <div className="text-[10px] text-gray-500 mt-0.5">
+                      เฉลี่ย {fmtMs(p.avgLatencyMs)}
                     </div>
                   </div>
                 );
@@ -159,10 +159,10 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
         </div>
 
         {/* ── 2. Hourly Request Volume ─────────────────────────────────── */}
-        <div className="glass rounded-2xl p-5 card-3d">
-          <h3 className="text-sm font-bold text-gray-300 mb-4 flex items-center gap-2">
+        <div className="glass rounded-xl p-3 card-3d" title="ปริมาณคำขอต่อชั่วโมง (แท่งเขียว = สำเร็จ, แท่งแดง = ล้มเหลว)">
+          <h3 className="text-sm font-black text-white mb-2 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            Hourly Request Volume
+            ปริมาณคำขอรายชั่วโมง
           </h3>
           <div className="flex items-end gap-[2px] h-32">
             {hourlyVolume.map((h) => {
@@ -178,7 +178,7 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
                   {/* Tooltip */}
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10">
                     <div className="glass rounded px-2 py-1 text-[10px] text-gray-300 whitespace-nowrap border border-white/10">
-                      {h.hour}:00 — {h.total} req ({h.success} ok, {h.failed} fail)
+                      {h.hour}:00 น. — {h.total} คำขอ (สำเร็จ {h.success}, ล้มเหลว {h.failed})
                     </div>
                   </div>
                   {/* Bar */}
@@ -216,23 +216,23 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
               </div>
             ))}
           </div>
-          <div className="flex items-center gap-4 mt-3 text-[10px] text-gray-500">
+          <div className="flex items-center gap-3 mt-2 text-[11px] text-gray-400">
             <span className="flex items-center gap-1">
               <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "rgba(52,211,153,0.7)" }} />
-              Success
+              สำเร็จ
             </span>
             <span className="flex items-center gap-1">
               <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "rgba(239,68,68,0.7)" }} />
-              Failed
+              ล้มเหลว
             </span>
           </div>
         </div>
 
         {/* ── 3. Top Models by Usage ───────────────────────────────────── */}
-        <div className="glass rounded-2xl p-5 card-3d">
-          <h3 className="text-sm font-bold text-gray-300 mb-4 flex items-center gap-2">
+        <div className="glass rounded-xl p-3 card-3d" title="model ที่ถูกเรียกใช้บ่อยสุดใน 24 ชม.">
+          <h3 className="text-sm font-black text-white mb-2 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-purple-400" />
-            Top Models by Usage
+            โมเดลที่ใช้บ่อยสุด
           </h3>
           {topModels.length === 0 ? (
             <p className="text-xs text-gray-600 text-center py-4">ไม่มีข้อมูล</p>
@@ -273,10 +273,10 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
         </div>
 
         {/* ── 4. Daily Token Usage ─────────────────────────────────────── */}
-        <div className="glass rounded-2xl p-5 card-3d">
-          <h3 className="text-sm font-bold text-gray-300 mb-4 flex items-center gap-2">
+        <div className="glass rounded-xl p-3 card-3d" title="ปริมาณ token ต่อวัน 7 วันย้อนหลัง (แบ่ง input / output)">
+          <h3 className="text-sm font-black text-white mb-2 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-amber-400" />
-            Token Usage (7 days)
+            ปริมาณ token 7 วันล่าสุด
           </h3>
           {dailyTokens.length === 0 ? (
             <p className="text-xs text-gray-600 text-center py-4">ไม่มีข้อมูล</p>
@@ -297,7 +297,7 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
                       {/* Tooltip */}
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10">
                         <div className="glass rounded px-2 py-1 text-[10px] text-gray-300 whitespace-nowrap border border-white/10">
-                          {d.date} — {fmtK(d.input)} in / {fmtK(d.output)} out
+                          {d.date} — รับเข้า {fmtK(d.input)} / ส่งออก {fmtK(d.output)}
                         </div>
                       </div>
                       <div className="w-full flex flex-col justify-end" style={{ height: "100%" }}>
@@ -330,17 +330,17 @@ export function Analytics({ data }: { data: AnalyticsData | null }) {
                   </div>
                 ))}
               </div>
-              <div className="flex items-center gap-4 mt-3 text-[10px] text-gray-500">
+              <div className="flex items-center gap-3 mt-2 text-[11px] text-gray-400">
                 <span className="flex items-center gap-1">
                   <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "rgba(99,102,241,0.7)" }} />
-                  Input
+                  รับเข้า
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "rgba(251,191,36,0.7)" }} />
-                  Output
+                  ส่งออก
                 </span>
-                <span className="ml-auto text-gray-600">
-                  Total: {fmtK(dailyTokens.reduce((s, d) => s + d.input + d.output, 0))} tokens
+                <span className="ml-auto text-gray-500">
+                  รวม {fmtK(dailyTokens.reduce((s, d) => s + d.input + d.output, 0))} token
                 </span>
               </div>
             </>
