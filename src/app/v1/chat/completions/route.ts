@@ -53,6 +53,65 @@ function slowThresholdMs(estInputTokens: number): number {
   return 5_000;
 }
 
+/**
+ * Inject minimal "assistant" turns between illegal role transitions so the
+ * Mistral chat-template tokenizer accepts the conversation. Legal pairs:
+ *   prev=system   → next = user | assistant          (tool here = invalid)
+ *   prev=user     → next = assistant                 (tool = invalid)
+ *   prev=assistant→ next = user | tool
+ *   prev=tool     → next = assistant | tool          (user = invalid)
+ *
+ * When an illegal pair is seen, insert a dummy assistant message that mirrors
+ * tool_call_id linkage. Minimal "Acknowledged." content keeps token cost low.
+ * Returns the possibly-modified array plus how many injections happened.
+ */
+function patchMistralMessageOrder(
+  msgs: Array<Record<string, unknown>>,
+): { messages: Array<Record<string, unknown>>; injected: number } {
+  if (!Array.isArray(msgs) || msgs.length === 0) return { messages: msgs, injected: 0 };
+  const out: Array<Record<string, unknown>> = [];
+  let injected = 0;
+  for (let i = 0; i < msgs.length; i++) {
+    const prev = out.length > 0 ? out[out.length - 1] : null;
+    const cur = msgs[i];
+    const prevRole = prev?.role as string | undefined;
+    const curRole = cur?.role as string | undefined;
+
+    // Illegal transitions → inject an assistant turn before cur
+    let needsAssistant = false;
+    if (prevRole === "system" && curRole === "tool") needsAssistant = true;
+    else if (prevRole === "user" && curRole === "tool") needsAssistant = true;
+    else if (prevRole === "tool" && curRole === "user") needsAssistant = true;
+    // system→user is fine, assistant→tool is fine, tool→assistant is fine
+
+    if (needsAssistant) {
+      // If the cur is a tool message, emit an assistant with matching tool_calls
+      // so Mistral sees the "assistant asked, tool answered" pair.
+      if (curRole === "tool") {
+        const toolCallId = (cur.tool_call_id as string) ?? `tc${Date.now().toString(36)}${injected}`;
+        const fakeAssistant: Record<string, unknown> = {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: toolCallId,
+            type: "function",
+            function: { name: "previous_tool", arguments: "{}" },
+          }],
+        };
+        out.push(fakeAssistant);
+        // Ensure the tool message's tool_call_id matches what we just emitted
+        if (!cur.tool_call_id) cur.tool_call_id = toolCallId;
+      } else {
+        // Generic assistant ack (tool → user case)
+        out.push({ role: "assistant", content: "Acknowledged." });
+      }
+      injected++;
+    }
+    out.push(cur);
+  }
+  return { messages: out, injected };
+}
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -856,6 +915,30 @@ async function forwardToProvider(
     }
     if (idMap.size > 0) console.log(`[FWD] Fixed ${idMap.size} tool_call_ids for Mistral compatibility`);
     if (requestBody.max_tokens && (requestBody.max_tokens as number) > 16384) requestBody.max_tokens = 16384;
+
+    // ── Message-order auto-patch for Mistral ────────────────────────────
+    // Mistral's chat-template validator strictly enforces:
+    //   system → user → assistant(tool_calls) → tool → assistant → user → ...
+    // A tool role MUST immediately follow an assistant message with matching
+    // tool_calls. Clients like Hermes agent and Zed editor commonly violate
+    // this by sending e.g. [system, tool, ...] or [tool, user] transitions.
+    //
+    // Industry fix (documented in zed-industries/zed#53392, roo-code#10618):
+    // inject a minimal assistant turn between illegal role pairs so the
+    // tokenizer sees a valid sequence. We do it here transparently so our
+    // clients don't need to change their code.
+    //
+    // Refs:
+    //   https://github.com/zed-industries/zed/issues/53392
+    //   https://github.com/BerriAI/litellm/issues/17761
+    //   https://docs.mistral.ai/api
+    const patched = patchMistralMessageOrder(
+      requestBody.messages as Array<Record<string, unknown>>
+    );
+    if (patched.injected > 0) {
+      requestBody.messages = patched.messages;
+      console.log(`[FWD] Patched Mistral message order — injected ${patched.injected} assistant turn(s)`);
+    }
   }
 
   if (provider === "ollama" && Array.isArray(requestBody.messages)) {
